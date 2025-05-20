@@ -30,12 +30,12 @@ A beginner-friendly data engineering project that collects real-time weather dat
 
 1. Clone this repo:
    ```bash
-   git clone https://github.com/yourusername/weather-data-pipeline.git
+   git clone https://github.com/lwinnitoy/weather-data-pipeline.git
    cd weather-data-pipeline
 
 2. Create and activate a virtual environment:
-    python -m venv venv
-    source venv/bin/activate  (On Windows: venv\Scripts\activate)
+   python -m venv venv
+   source venv/bin/activate  (On Windows: venv\Scripts\activate)
 
 3. Install dependencies:
     pip install -r requirements.txt
