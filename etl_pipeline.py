@@ -3,11 +3,10 @@ import pandas as pd
 from datetime import datetime
 import psycopg2
 from io import StringIO
-from dotenv import load_dotenv
+#from dotenv import load_dotenv
 import os
 
-load_dotenv()
-
+# loading enviroment variables from github secrets
 API_KEY = os.getenv("API_KEY")
 CITY = "Victoria,CA"
 
@@ -20,6 +19,12 @@ def extract():
     return data
 
 def transform(data):
+
+    #catch api errors
+    if "main" not in data:
+        print("API Error:", data)  # Log the whole response for debugging
+        return None
+     
     # Extract relevant data
     main_data = data['main']
     weather_data = data['weather'][0]
