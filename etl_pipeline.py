@@ -44,10 +44,10 @@ def load(df):
 
 
     # Fetch variables from github secrets
-    USER = os.getenv("USER")
-    PASSWORD = os.getenv("PASSWORD")
-    HOST = os.getenv("HOST")
-    PORT = os.getenv("PORT")
+    USER = os.getenv("DB_USER")
+    PASSWORD = os.getenv("DB_PASSWORD")
+    HOST = os.getenv("DB_HOST")
+    PORT = os.getenv("DB_PORT")
     DBNAME = os.getenv("DBNAME")
 
     # Prepare DataFrame as CSV in-memory
