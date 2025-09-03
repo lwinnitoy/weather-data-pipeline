@@ -1,6 +1,5 @@
 import requests
 import pandas as pd
-from sqlalchemy import create_engine
 from datetime import datetime
 import psycopg2
 from io import StringIO
@@ -10,7 +9,6 @@ import os
 load_dotenv()
 
 API_KEY = os.getenv("API_KEY")
-DB_URL = os.getenv("DB_URL")
 CITY = "Victoria,CA"
 
 
@@ -41,13 +39,16 @@ def transform(data):
     return df
 
 def load(df):
+    #comment the line below to load env variables from github secrets
+    load_dotenv()
+
 
     # Fetch variables from github secrets
-    USER = os.getenv("USER")
-    PASSWORD = os.getenv("PASSWORD")
-    HOST = os.getenv("HOST")
-    PORT = os.getenv("PORT")
-    DBNAME = os.getenv("DBNAME")
+    USER = os.getenv("DB_USER")
+    PASSWORD = os.getenv("DB_PASSWORD")
+    HOST = os.getenv("DB_HOST")
+    PORT = os.getenv("DB_PORT")
+    DBNAME = os.getenv("DB_NAME")
 
     # Prepare DataFrame as CSV in-memory
     cols = list(df.columns)
@@ -62,7 +63,7 @@ def load(df):
             password=PASSWORD,
             host=HOST,
             port=PORT,
-            dbname=DBNAME
+            dbname=DBNAME,
         )
         print("Connection successful!")
 
@@ -83,7 +84,7 @@ def load(df):
 def main():
     raw_data = extract()
     df = transform(raw_data)
-    print(df)
+    #print(df)
     load(df)
 
 
