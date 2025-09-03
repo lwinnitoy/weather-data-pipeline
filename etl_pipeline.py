@@ -1,9 +1,11 @@
 import requests
 import pandas as pd
 from sqlalchemy import create_engine
+from datetime import datetime
+import psycopg2
+from io import StringIO
 from dotenv import load_dotenv
 import os
-from datetime import datetime
 
 load_dotenv()
 
@@ -32,17 +34,51 @@ def transform(data):
         #'pressure': [main_data['pressure']],
         'humidity_percent': [main_data['humidity']],
         'weather_description': [weather_data['description']],
-        'wind_speed': [wind_data['speed']],
+        #'wind_speed': [wind_data['speed']],
         'timestamp_utc': [datetime.now()]
     })
 
     return df
 
 def load(df):
-    # Create a database connection
-    engine = create_engine(DB_URL)
-    # Load the DataFrame into the database
-    df.to_sql('weather_history', con=engine, if_exists='append', index=False)
+
+    # Fetch variables from github secrets
+    USER = os.getenv("USER")
+    PASSWORD = os.getenv("PASSWORD")
+    HOST = os.getenv("HOST")
+    PORT = os.getenv("PORT")
+    DBNAME = os.getenv("DBNAME")
+
+    # Prepare DataFrame as CSV in-memory
+    cols = list(df.columns)
+    csv_buffer = StringIO()
+    df.to_csv(csv_buffer, index=False, header=True)
+    csv_buffer.seek(0)
+
+    try:
+        # Connect to the database and use COPY for fast bulk load
+        connection = psycopg2.connect(
+            user=USER,
+            password=PASSWORD,
+            host=HOST,
+            port=PORT,
+            dbname=DBNAME
+        )
+        print("Connection successful!")
+
+        with connection:
+            with connection.cursor() as cursor:
+                # Quote column names to be safe
+                columns_sql = ','.join([f'"{c}"' for c in cols])
+                copy_sql = f"COPY weather_history ({columns_sql}) FROM STDIN WITH CSV HEADER"
+                cursor.copy_expert(copy_sql, csv_buffer)
+
+        print("Data loaded successfully using COPY.")
+        connection.close()
+        print("Connection closed.")
+
+    except Exception as e:
+        print(f"Failed to connect or load data: {e}")
 
 def main():
     raw_data = extract()
