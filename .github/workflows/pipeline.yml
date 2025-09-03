@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: pip install -r weather-data-pipeline/requirements.txt
       - name: Run pipeline
         env:
           DB_USER: ${{ secrets.USER }}
