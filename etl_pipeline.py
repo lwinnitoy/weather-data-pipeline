@@ -40,7 +40,7 @@ def transform(data):
 
 def load(df):
     #comment the line below to load env variables from github secrets
-    load_dotenv()
+    #load_dotenv()
 
 
     # Fetch variables from github secrets
