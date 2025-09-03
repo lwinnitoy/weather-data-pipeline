@@ -23,5 +23,5 @@ jobs:
           DB_HOST: ${{ secrets.HOST }}
           DB_PORT: ${{ secrets.PORT }}
           DB_NAME: ${{ secrets.DBNAME }}
-          WEATHER_API_KEY: ${{ secrets.API_KEY }}
+          API_KEY: ${{ secrets.API_KEY }}
         run: python3 etl_pipeline.py
