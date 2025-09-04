@@ -3,17 +3,29 @@ import pandas as pd
 from datetime import datetime
 import psycopg2
 from io import StringIO
-#from dotenv import load_dotenv
+from dotenv import load_dotenv
 import os
 
-# loading enviroment variables from github secrets
+
+#comment the line below loads env vars from .env file
+#comment it out to load env variables from github secrets
+#load_dotenv()
+
+# loading openweathermap variables from github secrets
 API_KEY = os.getenv("API_KEY")
 CITY = "Victoria,CA"
+
+# Fetch variables supabase variables from github secrets
+USER = os.getenv("DB_USER")
+PASSWORD = os.getenv("DB_PASSWORD")
+HOST = os.getenv("DB_HOST")
+PORT = os.getenv("DB_PORT")
+DBNAME = os.getenv("DBNAME")
 
 
 
 def extract():
-    url = f"http://api.openweathermap.org/data/2.5/weather?q={CITY}&appid={API_KEY}&unit=metric"
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={CITY}&appid={API_KEY}&units=metric"
     response = requests.get(url)
     data = response.json()
     return data
@@ -44,16 +56,6 @@ def transform(data):
     return df
 
 def load(df):
-    #comment the line below to load env variables from github secrets
-    #load_dotenv()
-
-
-    # Fetch variables from github secrets
-    USER = os.getenv("DB_USER")
-    PASSWORD = os.getenv("DB_PASSWORD")
-    HOST = os.getenv("DB_HOST")
-    PORT = os.getenv("DB_PORT")
-    DBNAME = os.getenv("DBNAME")
 
     # Prepare DataFrame as CSV in-memory
     cols = list(df.columns)
@@ -69,6 +71,7 @@ def load(df):
             host=HOST,
             port=PORT,
             dbname=DBNAME,
+            sslmode="require"
         )
         print("Connection successful!")
 
