@@ -9,7 +9,7 @@ import os
 
 #comment the line below loads env vars from .env file
 #comment it out to load env variables from github secrets
-#load_dotenv()
+load_dotenv()
 
 # loading openweathermap variables from github secrets
 API_KEY = os.getenv("API_KEY")
@@ -55,7 +55,13 @@ def transform(data):
 
     return df
 
+
 def load(df):
+
+    # Guard: nothing to load
+    if df is None or df.empty:
+        print("No data to load.")
+        return
 
     # Prepare DataFrame as CSV in-memory
     cols = list(df.columns)
@@ -64,20 +70,25 @@ def load(df):
     csv_buffer.seek(0)
 
     try:
-        # Connect to the database and use COPY for fast bulk load
+        # Log target (redact password)
+        try:
+            print(f"Connecting to host={HOST} port={PORT} db={DBNAME} user={USER}")
+        except Exception:
+            pass
+
+        # Connect using separate environment variables (no DATABASE_URL)
         connection = psycopg2.connect(
             user=USER,
             password=PASSWORD,
             host=HOST,
             port=PORT,
             dbname=DBNAME,
-            sslmode="require"
+            sslmode=os.getenv("PGSSLMODE", "require")
         )
         print("Connection successful!")
 
         with connection:
             with connection.cursor() as cursor:
-                # Quote column names to be safe
                 columns_sql = ','.join([f'"{c}"' for c in cols])
                 copy_sql = f"COPY weather_history ({columns_sql}) FROM STDIN WITH CSV HEADER"
                 cursor.copy_expert(copy_sql, csv_buffer)
@@ -87,15 +98,39 @@ def load(df):
         print("Connection closed.")
 
     except Exception as e:
-        print(f"Failed to connect or load data: {e}")
+        print("Failed to connect or load data:")
+        print(repr(e))
+        try:
+            if isinstance(e, psycopg2.Error):
+                pgcode = getattr(e, "pgcode", None)
+                diag = getattr(e, "diag", None)
+                print("pgcode:", pgcode)
+                if diag:
+                    print("message_primary:", getattr(diag, "message_primary", None))
+                    print("detail:", getattr(diag, "detail", None))
+        except Exception:
+            pass
+        raise
 
 def main():
     raw_data = extract()
     df = transform(raw_data)
-    #print(df)
     load(df)
 
 
 if __name__ == "__main__":
-    main()
-    print("ETL pipeline executed successfully.")
+    try:
+        main()
+        print("ETL pipeline executed successfully.")
+    except Exception as e:
+        print("ETL pipeline failed:", repr(e))
+        try:
+            if isinstance(e, psycopg2.Error):
+                print("pgcode:", getattr(e, "pgcode", None))
+                diag = getattr(e, "diag", None)
+                if diag:
+                    print("message_primary:", getattr(diag, "message_primary", None))
+                    print("detail:", getattr(diag, "detail", None))
+        except Exception:
+            pass
+        raise
