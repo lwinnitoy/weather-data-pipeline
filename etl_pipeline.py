@@ -9,7 +9,7 @@ import os
 
 #comment the line below loads env vars from .env file
 #comment it out to load env variables from github secrets
-load_dotenv()
+#load_dotenv()
 
 # loading openweathermap variables from github secrets
 API_KEY = os.getenv("API_KEY")
