@@ -20,7 +20,7 @@ USER = os.getenv("DB_USER")
 PASSWORD = os.getenv("DB_PASSWORD")
 HOST = os.getenv("DB_HOST")
 PORT = os.getenv("DB_PORT")
-DBNAME = os.getenv("DBNAME")
+DBNAME = os.getenv("DB_NAME")
 
 
 
