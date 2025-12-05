@@ -55,6 +55,7 @@ htmlcov/
 .idea/
 *.sublime-workspace
 *.sublime-project
+.github/copilot-instructions.md
 
 # System files
 .DS_Store

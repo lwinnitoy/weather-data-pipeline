@@ -6,11 +6,13 @@ A beginner-friendly data engineering project that collects real-time weather dat
 
 ## Features
 
-- Collects real-time weather data from a public API
-- Cleans and processes the data using Python
-- Stores structured weather data in a PostgreSQL database
-- Automates data collection with GitHub Actions (or cron)
-- Optional: Visualizes data using Streamlit or Jupyter
+- Collects real-time weather data from OpenWeatherMap API
+- Extracts weather metrics: temperature, pressure, humidity, wind speed, and weather description
+- Transforms data using pandas with timezone-aware timestamps (UTC and Pacific Time)
+- Loads data into PostgreSQL database using efficient COPY command
+- Stores data for Victoria, BC, Canada
+- Includes error handling for API failures and database connection issues
+- Supports environment variable configuration via .env file or GitHub Secrets
 
 ---
 
@@ -18,11 +20,11 @@ A beginner-friendly data engineering project that collects real-time weather dat
 
 - **Python** (3.8+)
 - **OpenWeatherMap API** – Data source
-- **PostgreSQL** – Cloud-hosted via [Render](https://render.com) or [Supabase](https://supabase.com)
+- **PostgreSQL** – Cloud-hosted via [Supabase](https://supabase.com)
 - **pandas** – For data processing
-- **SQLAlchemy / psycopg2** – For DB connection
+- **psycopg2-binary** – For DB connection
+- **python-dotenv** – For environment variable management
 - **GitHub Actions** – For automation (optional)
-- **Streamlit** – Optional dashboard for visualization
 
 ---
 
@@ -42,17 +44,28 @@ A beginner-friendly data engineering project that collects real-time weather dat
 
 4. Set up environment variables in a .env file:
     API_KEY=your_openweathermap_api_key
-    DB_URL=your_postgresql_connection_string
+    DB_USER=your_postgres_username
+    DB_PASSWORD=your_postgres_password
+    DB_HOST=your_postgres_host
+    DB_PORT=your_postgres_port
+    DB_NAME=your_database_name
+    PGSSLMODE=require
 
 ---
 
 ## Usage
 
-1. Run the ETL script manually:
-    python etl_pipeline.py
+Run the ETL script manually:
+```bash
+python etl_pipeline.py
+```
 
-2. Launch the Streamlit dashboard:
-    streamlit run dashboard.py
+The script will:
+- Extract weather data from OpenWeatherMap API for Victoria, CA
+- Transform the data (temperature, pressure, humidity, wind speed, weather description)
+- Load the data into a PostgreSQL database table named `weather_history`
+
+Note: The dashboard is not yet implemented.
 
 
 
