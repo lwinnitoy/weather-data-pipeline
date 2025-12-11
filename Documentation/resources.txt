@@ -1,0 +1,3 @@
+openweathermap weather data api
+supabase postgres db
+simplemaps https://simplemaps.com/data/canada-cities canadian city data
