@@ -1,0 +1,33 @@
+# .github/workflows/test-pipeline.yml
+name: Test Weather Pipeline
+
+on:
+  push:
+    branches:
+      - update_extraction
+  workflow_dispatch:
+
+jobs:
+  test-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Run ETL pipeline (test)
+        env:
+          DB_USER: ${{ secrets.USER }}
+          DB_PASSWORD: ${{ secrets.PASSWORD }}
+          DB_HOST: ${{ secrets.HOST }}
+          DB_PORT: ${{ secrets.PORT }}
+          DB_NAME: ${{ secrets.DBNAME }}
+          API_KEY: ${{ secrets.API_KEY }}
+          LOG_LEVEL: DEBUG  # More verbose for testing
+        run: python etl_pipeline.py
