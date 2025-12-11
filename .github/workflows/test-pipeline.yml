@@ -4,7 +4,7 @@ name: Test Weather Pipeline
 on:
   push:
     branches:
-      - update_extraction
+      - dev
   workflow_dispatch:
 
 jobs:
