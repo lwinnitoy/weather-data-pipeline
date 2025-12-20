@@ -107,21 +107,32 @@ def _transform_forecast_record(city_id: int, data: dict) -> Optional[Dict]:
         Dictionary matching weather_forecast schema, or None if invalid
     """
     # Validate required fields
-    if not all(key in data for key in ['list', 'list.main', 'list.weather', 'list.wind']):
+    if not all(key in data for key in ['list']):
         logger.warning(f"Missing required fields in data for city_id {city_id}")
         return None
     
-    if not data['list.weather']:
+    forecast_data = dict(data['list'][0])
+
+    if not all(key in forecast_data for key in ['main', 'weather', 'wind']):
+        logger.warning(f"Missing required fields in data for city_id {city_id}")
+        return None
+    
+    if not forecast_data['weather']:
         logger.warning(f"Empty weather array for city_id {city_id}")
         return None
     
-    main_data = data['list.main']
-    weather_data = data['list.weather'][0]
-    wind_data = data['list.wind']
+    main_data = forecast_data['main']
+    weather_data = forecast_data['weather'][0]
+    wind_data = forecast_data['wind']
+    
+    # Parse forecast timestamp and make it timezone-aware (UTC)
+    forecast_time = datetime.fromisoformat(forecast_data['dt_txt']).replace(tzinfo=timezone.utc)
+    now_utc = datetime.now(timezone.utc)
+    hours_ahead = int((forecast_time - now_utc).total_seconds() // 3600)
     
     return {
         'city_id': city_id,
-        'timestamp_utc': datetime.now(timezone.utc),
+        'timestamp_utc': now_utc,
         'temp_c': main_data['temp'],
         'feels_like_c': main_data['feels_like'],
         'pressure_hpa': main_data['pressure'],
@@ -129,6 +140,6 @@ def _transform_forecast_record(city_id: int, data: dict) -> Optional[Dict]:
         'wind_speed_ms': wind_data['speed'],
         'weather_description': weather_data['description'],
         'raw_json': json.dumps(data),
-        'forecast_timestamp': datetime.fromisoformat(data['list.dt_txt'].replace('Z', '+00:00')),
-        'forecast_horizon': int((datetime.fromisoformat(data['list.dt_txt'].replace('Z', '+00:00')) - datetime.now(timezone.utc)).total_seconds() // 3600)
+        'forecast_timestamp': forecast_time,
+        'forecast_horizon': hours_ahead
     }
