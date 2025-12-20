@@ -15,9 +15,10 @@ logger = logging.getLogger(__name__)
 def _get_db_connection():
     """Create and return a database connection."""
     return psycopg2.connect(**config.DATABASE)
-def extract_openweathermap() -> Dict[int, dict]:
+
+def extract_openweathermap(endpoint: str) -> Dict[int, dict]:
     """
-    Extract current weather data from OpenWeatherMap API for all configured cities.
+    Extract current weather data or forecast or alerts from OpenWeatherMap API for all configured cities.
     
     Returns:
         Dictionary mapping city_id to weather data: {city_id: api_response}
@@ -27,9 +28,12 @@ def extract_openweathermap() -> Dict[int, dict]:
     city_map = _get_city_mapping()
     city_data = {}
 
+    if endpoint not in ["weather", "forecast"]: 
+        endpoint = "weather"
+
     for city_name, lat, lon in cities:
         try:
-            url = (f"{config.API_BASE_URL}/weather?"
+            url = (f"{config.API_BASE_URL}/{endpoint}?"
                    f"lat={lat}&lon={lon}&appid={config.OPENWEATHERMAP_API_KEY}&units=metric")
             
             response = requests.get(url, timeout=config.API_TIMEOUT)
@@ -90,3 +94,4 @@ def _get_city_mapping() -> Dict[str, int]:
     except psycopg2.Error as e:
         logger.error(f"Database error fetching city mapping: {e}")
         raise
+

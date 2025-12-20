@@ -1,8 +1,8 @@
-name: Run Weather Pipeline
+name: Run Forecast Pipeline
 
 on:
   schedule:
-    - cron: "0 * * * *"   # every hour
+    - cron: "0 */3 * * *"   # every hour
   workflow_dispatch:       # manual run
 
 jobs:
@@ -24,4 +24,4 @@ jobs:
           DB_PORT: ${{ secrets.PORT }}
           DB_NAME: ${{ secrets.DBNAME }}
           API_KEY: ${{ secrets.API_KEY }}
-        run: python3 etl_pipeline.py
+        run: python3 forecast_pipeline.py

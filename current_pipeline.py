@@ -1,11 +1,11 @@
 """
-Main ETL Pipeline: Orchestrates extraction, transformation, and loading of weather data.
+Current Weather Pipeline: Orchestrates hourly weather data collection.
 """
 import logging
 import config
 from extract import extract_openweathermap
-from transform import transform
-from load import load
+from transform import transform_current_weather
+from load import load_weather
 
 # Configure logging
 logging.basicConfig(
@@ -16,11 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    """Execute the complete ETL pipeline for weather data."""
+    """Execute current weather pipeline."""
     try:
         # Extract
-        logger.info("Starting extraction...")
-        raw_data = extract_openweathermap()
+        logger.info("Starting current weather extraction...")
+        raw_data = extract_openweathermap("weather")
         
         if not raw_data:
             logger.warning("No data extracted. Exiting.")
@@ -28,7 +28,7 @@ def main() -> None:
         
         # Transform
         logger.info("Starting transformation...")
-        records = transform(raw_data)
+        records = transform_current_weather(raw_data)
         
         if not records:
             logger.warning("No records after transformation. Exiting.")
@@ -36,17 +36,14 @@ def main() -> None:
         
         # Load
         logger.info("Starting load...")
-        load(records)
+        load_weather(records)
         
-        logger.info("ETL pipeline completed successfully")
+        logger.info("Current weather pipeline completed successfully")
         
     except Exception as e:
-        logger.error(f"ETL pipeline failed: {e}", exc_info=True)
+        logger.error(f"Current weather pipeline failed: {e}", exc_info=True)
         raise
 
 
 if __name__ == "__main__":
     main()
-
-
-

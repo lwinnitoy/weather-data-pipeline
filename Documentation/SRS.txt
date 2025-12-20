@@ -221,7 +221,7 @@ Steps:
 This SRS represents the complete vision for the platform. Implementation is divided into four 
 phases to ensure incremental progress and maintainability.
 
-8.1 Phase 1: Core ETL Foundation (Current)
+8.1 Phase 1: Core ETL Foundation
 Status: In Progress
 Timeline: 2-3 weeks
 
@@ -247,7 +247,7 @@ Acceptance:
 • No duplicate records for same timestamp + city
 • Clean separation between E/T/L modules
 
-8.2 Phase 2: Multiple Data Sources
+8.2 Phase 2: Multiple Data Sources (Current)
 Status: Planned
 Timeline: 3-4 weeks
 
