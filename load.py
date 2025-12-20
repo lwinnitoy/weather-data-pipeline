@@ -34,6 +34,7 @@ def load_weather(records: List[Dict]) -> None:
             %(pressure_hpa)s, %(humidity_pct)s, %(wind_speed_ms)s,
             %(weather_description)s, %(raw_json)s::jsonb
         )
+        ON CONFLICT (city_id, timestamp_utc) DO NOTHING
     """
 
     try:
@@ -75,6 +76,7 @@ def load_forecast(records: List[Dict]) -> None:
             %(pressure_hpa)s, %(humidity_pct)s, %(wind_speed_ms)s,
             %(weather_description)s, %(raw_json)s::jsonb, %(forecast_timestamp)s, %(forecast_horizon)s
         )
+        ON CONFLICT (city_id, forecast_timestamp, timestamp_utc) DO NOTHING
     """
 
     try:
