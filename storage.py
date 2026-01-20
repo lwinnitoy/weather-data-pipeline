@@ -18,9 +18,7 @@ import logging
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
-
 import pandas as pd
-
 import config
 
 logger = logging.getLogger(__name__)
@@ -31,13 +29,14 @@ logger = logging.getLogger(__name__)
 # These construct paths without touching the filesystem
 # =============================================================================
 
-def get_raw_path(city: str, timestamp: datetime) -> Path:
+def get_raw_path(city: str, timestamp: datetime, data_type: str = "current") -> Path:
     """
     Build the path for a raw JSON file.
     
     Args:
         city: City name (will be normalized to lowercase, spaces → underscores)
         timestamp: When the data was fetched (used for partitioning)
+        data_type: type of weather data i.e forecast/current
     
     Returns:
         Path object like: data_lake/raw/toronto/2025/12/20/1734567890.json
@@ -46,12 +45,18 @@ def get_raw_path(city: str, timestamp: datetime) -> Path:
         >>> get_raw_path("Toronto", datetime(2025, 12, 20, 10, 30, 0))
         Path('data_lake/raw/toronto/2025/12/20/1734693000.json')
     """
+    #ensure data type is correct
+    if data_type not in ["current", "forecast"]:
+        logger.error("Data type not supported")
+        return None
+    
     normalized_city = _normalize_city_name(city)
     unix_ts = int(timestamp.timestamp())
 
     raw_path = (
         config.DATA_LAKE_ROOT 
         / config.RAW_LAYER_DIR
+        / f"{data_type}"
         / normalized_city
         / f"{timestamp.year}"
         / f"{timestamp.month:02d}" 
@@ -61,7 +66,7 @@ def get_raw_path(city: str, timestamp: datetime) -> Path:
     return raw_path
 
 
-def get_staging_path(city: str, year: int, month: int) -> Path:
+def get_staging_path(city: str, year: int, month: int, data_type: str = "current") -> Path:
     """
     Build the path for a staging Parquet file.
     
@@ -71,14 +76,21 @@ def get_staging_path(city: str, year: int, month: int) -> Path:
         city: City name (normalized)
         year: 4-digit year
         month: 1-12
+        data_type: type of weather data i.e forecast/current
     
     Returns:
         Path object like: data_lake/staging/city=toronto/year=2025/month=12/data.parquet
     """
+    #ensure data type is correct
+    if data_type not in ["current", "forecast"]:
+        logger.error("Data type not supported")
+        return None
+
     normalized_city = _normalize_city_name(city)
     staging_path = (
         config.DATA_LAKE_ROOT
         / config.STAGING_LAYER_DIR
+        / f"{data_type}"
         / f"city={normalized_city}"
         / f"year={year}"
         / f"month={month:02d}"
@@ -108,7 +120,7 @@ def _normalize_city_name(city: str) -> str:
 # Write-once, read-many pattern for preserving API responses
 # =============================================================================
 
-def write_raw(city: str, timestamp: datetime, data: dict) -> Path:
+def write_raw(city: str, timestamp: datetime, data: dict, data_type: str = "current") -> Path:
     """
     Write raw API response to the data lake.
     
@@ -119,6 +131,7 @@ def write_raw(city: str, timestamp: datetime, data: dict) -> Path:
         city: City name
         timestamp: When data was fetched
         data: Raw API response dictionary
+        data_type: type of weather data i.e forecast/current
     
     Returns:
         Path where file was written
@@ -126,7 +139,7 @@ def write_raw(city: str, timestamp: datetime, data: dict) -> Path:
     Raises:
         IOError: If write fails
     """
-    path = get_raw_path(city, timestamp)
+    path = get_raw_path(city, timestamp, data_type)
     path.parent.mkdir(parents=True, exist_ok=True)  # Create parent directories
     
     # Temp file as sibling with .tmp suffix
@@ -152,7 +165,7 @@ def write_raw(city: str, timestamp: datetime, data: dict) -> Path:
     return path
 
 
-def read_raw_files(city: str, start_date: date, end_date: date) -> List[Dict]:
+def read_raw_files(city: str, start_date: date, end_date: date, data_type: str = "current") -> List[Dict]:
     """
     Read all raw JSON files for a city within a date range.
     
@@ -162,6 +175,7 @@ def read_raw_files(city: str, start_date: date, end_date: date) -> List[Dict]:
         city: City name
         start_date: Inclusive start date
         end_date: Inclusive end date
+        data_type: type of weather data i.e forecast/current
     
     Returns:
         List of dictionaries, each containing:
@@ -180,6 +194,7 @@ def read_raw_files(city: str, start_date: date, end_date: date) -> List[Dict]:
     base = (
         config.DATA_LAKE_ROOT
         / config.RAW_LAYER_DIR
+        / data_type
         / normalized_city
     )
 
@@ -219,7 +234,7 @@ def read_raw_files(city: str, start_date: date, end_date: date) -> List[Dict]:
     return files_list
 
 
-def list_raw_files_after(city: str, after_timestamp: Optional[datetime] = None) -> List[Path]:
+def list_raw_files_after(city: str, after_timestamp: Optional[datetime] = None, data_type: str = "current") -> List[Path]:
     """
     List raw files for a city, optionally filtered by timestamp.
     
@@ -229,6 +244,7 @@ def list_raw_files_after(city: str, after_timestamp: Optional[datetime] = None) 
         city: City name
         after_timestamp: Only return files with timestamp > this value
                         If None, returns all files for the city
+        data_type: type of weather data i.e forecast/current
     
     Returns:
         List of Paths to raw JSON files, sorted by timestamp ascending
@@ -238,6 +254,7 @@ def list_raw_files_after(city: str, after_timestamp: Optional[datetime] = None) 
     base = (
         config.DATA_LAKE_ROOT
         / config.RAW_LAYER_DIR
+        / data_type
         / normalized_city
     )
 
@@ -268,7 +285,7 @@ def list_raw_files_after(city: str, after_timestamp: Optional[datetime] = None) 
 # Parquet files optimized for analytics
 # =============================================================================
 
-def write_staging(city: str, year: int, month: int, df: pd.DataFrame) -> Path:
+def write_staging(city: str, year: int, month: int, df: pd.DataFrame, data_type: str = "current") -> Path:
     """
     Write a DataFrame to the staging layer as Parquet.
     
@@ -279,11 +296,12 @@ def write_staging(city: str, year: int, month: int, df: pd.DataFrame) -> Path:
         year: 4-digit year
         month: 1-12
         df: DataFrame with transformed weather data
+        data_type: type of weather data i.e forecast/current
     
     Returns:
         Path where Parquet file was written
     """
-    path = get_staging_path(city, year, month)
+    path = get_staging_path(city, year, month, data_type)
     path.parent.mkdir(parents=True, exist_ok=True)  # Create parent directories
     
     # Temp file as sibling with .tmp suffix
@@ -309,7 +327,7 @@ def write_staging(city: str, year: int, month: int, df: pd.DataFrame) -> Path:
 
 
 
-def read_staging(city: str, year: int, month: int) -> Optional[pd.DataFrame]:
+def read_staging(city: str, year: int, month: int, data_type: str = "current") -> Optional[pd.DataFrame]:
     """
     Read staging Parquet file for a partition.
     
@@ -317,11 +335,12 @@ def read_staging(city: str, year: int, month: int) -> Optional[pd.DataFrame]:
         city: City name
         year: 4-digit year
         month: 1-12
+        data_type: type of weather data i.e forecast/current
     
     Returns:
         DataFrame if file exists, None otherwise
     """
-    path = get_staging_path(city, year, month)
+    path = get_staging_path(city, year, month, data_type)
     
     if not path.exists():
         return None
@@ -340,7 +359,7 @@ def read_staging(city: str, year: int, month: int) -> Optional[pd.DataFrame]:
 # Enables incremental processing by tracking last processed timestamp
 # =============================================================================
 
-def get_high_water_mark(city: str, year: int, month: int) -> Optional[datetime]:
+def get_high_water_mark(city: str, year: int, month: int, data_type: str = "current") -> Optional[datetime]:
     """
     Get the timestamp of the last processed raw file for a partition.
     
@@ -350,6 +369,7 @@ def get_high_water_mark(city: str, year: int, month: int) -> Optional[datetime]:
         city: City name
         year: 4-digit year  
         month: 1-12
+        data_type: type of weather data i.e forecast/current
     
     Returns:
         Datetime of last processed file, or None if never processed
@@ -376,7 +396,7 @@ def get_high_water_mark(city: str, year: int, month: int) -> Optional[datetime]:
     
     
 
-def set_high_water_mark(city: str, year: int, month: int, timestamp: datetime) -> None:
+def set_high_water_mark(city: str, year: int, month: int, timestamp: datetime, data_type: str = "current") -> None:
     """
     Update the high-water mark after processing.
     
@@ -387,6 +407,7 @@ def set_high_water_mark(city: str, year: int, month: int, timestamp: datetime) -
         year: 4-digit year
         month: 1-12
         timestamp: Timestamp of the newest raw file that was processed
+        data_type: type of weather data i.e forecast/current
     """
     path = get_staging_path(city, year, month).parent / ".last_processed.json"
     path.parent.mkdir(parents=True, exist_ok=True) #ensure the parent exits
