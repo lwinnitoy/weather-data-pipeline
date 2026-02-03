@@ -6,6 +6,8 @@ import psycopg2
 from typing import Dict, List, Tuple
 import logging
 import config
+from storage import write_raw
+import datetime as datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -45,6 +47,14 @@ def extract_openweathermap(endpoint: str) -> Dict[int, dict]:
             city_id = city_map.get(city_name)
             if city_id:
                 city_data[city_id] = response.json()
+
+                #write raw data to data lake
+                if endpoint == "weather":
+                    data_type = "current"
+                else:
+                    data_type = "forecast"
+                write_raw(city_name, datetime.datetime.now().timestamp(), response.json(), data_type)
+                logger.info(f"Successfully wrote response for {city_name} to raw layer")
             else:
                 logger.warning(f"City {city_name} not found in mapping")
                 
@@ -53,6 +63,7 @@ def extract_openweathermap(endpoint: str) -> Dict[int, dict]:
             continue  # Continue with other cities
     
     logger.info(f"Successfully fetched weather for {len(city_data)} cities")
+
     return city_data
 
 
@@ -94,4 +105,3 @@ def _get_city_mapping() -> Dict[str, int]:
     except psycopg2.Error as e:
         logger.error(f"Database error fetching city mapping: {e}")
         raise
-
