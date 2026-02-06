@@ -6,6 +6,7 @@ import psycopg2
 from typing import Dict, List, Tuple
 import logging
 import config
+import utils
 from storage import write_raw
 import datetime as datetime
 
@@ -27,7 +28,7 @@ def extract_openweathermap(endpoint: str) -> Dict[int, dict]:
         Returns empty dict if all cities fail.
     """
     cities = _get_cities_to_fetch()
-    city_map = _get_city_mapping()
+    city_map = utils._get_city_mapping()
     city_data = {}
 
     if endpoint not in ["weather", "forecast"]: 
@@ -86,22 +87,4 @@ def _get_cities_to_fetch() -> List[Tuple[str, float, float]]:
     except psycopg2.Error as e:
         logger.error(f"Database error fetching cities: {e}")
         logger.error(f"pgcode: {e.pgcode}")
-        raise
-
-
-def _get_city_mapping() -> Dict[str, int]:
-    """
-    Get mapping of city names to database IDs.
-    
-    Returns:
-        Dictionary: {city_name: city_id}
-    """
-    try:
-        with _get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT id, city_ascii FROM cities")
-                return {name: city_id for city_id, name in cursor.fetchall()}
-                
-    except psycopg2.Error as e:
-        logger.error(f"Database error fetching city mapping: {e}")
         raise

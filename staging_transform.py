@@ -14,7 +14,7 @@ Forecast Staging Schema:
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
@@ -58,7 +58,7 @@ def process_city_current(city: str) -> int:
 
     #group by partition
     for path in files:
-        key = extract_partition_key(datetime.fromtimestamp(int(path.stem)))
+        key = extract_partition_key(datetime.fromtimestamp(int(path.stem), tz=timezone.utc))
         partition_dict[key].append(path)
 
     #process each partition
@@ -91,7 +91,7 @@ def process_partition_current(city: str, year: int, month: int) -> int:
 
     # Filter to only files in this partition
     filtered_list = [
-    path for path in files if (ts := datetime.fromtimestamp(int(path.stem))).year == year and ts.month == month
+    path for path in files if (ts := datetime.fromtimestamp(int(path.stem), tz=timezone.utc)).year == year and ts.month == month
     ]
     
     if not filtered_list:
@@ -101,7 +101,7 @@ def process_partition_current(city: str, year: int, month: int) -> int:
     records = []
     for path in filtered_list:
         raw = read_raw_json(path)
-        ts = datetime.fromtimestamp(int(path.stem))
+        ts = datetime.fromtimestamp(int(path.stem), tz=timezone.utc)
         record = transform_current_to_record(city=city, raw_data=raw, timestamp=ts)
         if record:
             records.append(record)
@@ -113,7 +113,7 @@ def process_partition_current(city: str, year: int, month: int) -> int:
     write_staging(city, year, month, merged, data_type)
 
     #update high water-mark
-    newest_ts = datetime.fromtimestamp(int(filtered_list[-1].stem))
+    newest_ts = datetime.fromtimestamp(int(filtered_list[-1].stem), tz=timezone.utc)
     set_high_water_mark(city, year, month, newest_ts, data_type)
     return len(filtered_list)
 
@@ -139,7 +139,7 @@ def process_city_forecast(city: str) -> int:
 
     #group by partition
     for path in files:
-        key = extract_partition_key(datetime.fromtimestamp(int(path.stem)))
+        key = extract_partition_key(datetime.fromtimestamp(int(path.stem), tz=timezone.utc))
         partition_dict[key].append(path)
 
     #process each partition
@@ -170,7 +170,7 @@ def process_partition_forecast(city: str, year: int, month: int) -> int:
 
     # Filter to only files in this partition
     filtered_list = [
-    path for path in files if (ts := datetime.fromtimestamp(int(path.stem))).year == year and ts.month == month
+    path for path in files if (ts := datetime.fromtimestamp(int(path.stem), tz=timezone.utc)).year == year and ts.month == month
     ]
     
     if not filtered_list:
@@ -180,7 +180,7 @@ def process_partition_forecast(city: str, year: int, month: int) -> int:
     records = []
     for path in filtered_list:
         raw = read_raw_json(path)
-        ts = datetime.fromtimestamp(int(path.stem))
+        ts = datetime.fromtimestamp(int(path.stem), tz=timezone.utc)
         record = transform_forecast_to_records(city=city, raw_data=raw, fetched_at=ts)
         if record:
             records.extend(record)
@@ -192,7 +192,7 @@ def process_partition_forecast(city: str, year: int, month: int) -> int:
     write_staging(city, year, month, merged, data_type)
 
     #update high water-mark
-    newest_ts = datetime.fromtimestamp(int(filtered_list[-1].stem))
+    newest_ts = datetime.fromtimestamp(int(filtered_list[-1].stem), tz=timezone.utc)
     set_high_water_mark(city, year, month, newest_ts, data_type)
     return len(filtered_list)
 
@@ -282,7 +282,7 @@ def transform_forecast_to_records(raw_data: dict, city: str, fetched_at: datetim
             wind = data["wind"]
             weather = data["weather"][0]
 
-            horizon = datetime.fromtimestamp(data["dt"]) - fetched_at
+            horizon = datetime.fromtimestamp(data["dt"], tz=timezone.utc) - fetched_at
             horizon_hours = int(horizon.total_seconds() // 3600)
             
             rec = {
@@ -298,7 +298,7 @@ def transform_forecast_to_records(raw_data: dict, city: str, fetched_at: datetim
                 "weather_description": weather["description"],
                 "clouds_pct": data["clouds"]["all"],
                 "feels_like_delta": main["feels_like"] - main["temp"],
-                "forecast_for": datetime.fromtimestamp(data["dt"]),
+                "forecast_for": datetime.fromtimestamp(data["dt"], tz=timezone.utc),
                 "horizon_hours": horizon_hours
             }
             records.append(rec)
