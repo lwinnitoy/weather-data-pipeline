@@ -44,7 +44,7 @@ def load_weather() -> None:
         VALUES (
             %(city_id)s, %(timestamp_utc)s, %(temp_c)s, %(feels_like_c)s,
             %(pressure_hpa)s, %(humidity_pct)s, %(wind_speed_ms)s,
-            %(weather_description)s, %(raw_json)s::jsonb
+            %(weather_description)s, NULL
         )
         ON CONFLICT (city_id, timestamp_utc) DO NOTHING
     """
@@ -197,6 +197,13 @@ def _extract_staging(data_type) -> List[Dict]:
             df = storage.read_staging(city, timestamp.year, timestamp.month, data_type)
             if df is not None:
                 df["city_id"] = city_id
+                # Rename staging column to match DB schema
+                if "timestamp" in df.columns:
+                    df = df.rename(columns={"timestamp": "timestamp_utc"})
+                if "fetched_at" in df.columns:
+                    df = df.rename(columns={"fetched_at": "timestamp_utc"})
+                if "forecast_for" in df.columns:
+                    df = df.rename(columns={"forecast_for": "forecast_timestamp", "horizon_hours": "forecast_horizon"})
                 records.extend(df.to_dict(orient="records"))
             
             # Increment months
