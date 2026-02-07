@@ -2,7 +2,7 @@ name: Run Forecast Pipeline
 
 on:
   schedule:
-    - cron: "0 */3 * * *"   # every hour
+    - cron: "0 */3 * * *"
   workflow_dispatch:       # manual run
 
 jobs:
@@ -24,4 +24,4 @@ jobs:
           DB_PORT: ${{ secrets.PORT }}
           DB_NAME: ${{ secrets.DBNAME }}
           API_KEY: ${{ secrets.API_KEY }}
-        run: python3 forecast_pipeline.py
+        run: python orchestrator.py --data-types forecast

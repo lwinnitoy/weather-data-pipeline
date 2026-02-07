@@ -12,8 +12,8 @@ import requests
 from extract import (
     extract_openweathermap,
     _get_cities_to_fetch,
-    _get_city_mapping,
 )
+from utils import _get_city_mapping
 
 
 # =============================================================================
@@ -103,8 +103,8 @@ class TestGetCitiesToFetch:
 class TestGetCityMapping:
     """Tests for _get_city_mapping."""
     
-    @patch('extract._get_db_connection')
-    def test_returns_dict_mapping(self, mock_conn):
+    @patch('utils.psycopg2.connect')
+    def test_returns_dict_mapping(self, mock_connect):
         """Test that city mapping is returned as dict."""
         mock_cursor = MagicMock()
         mock_cursor.fetchall.return_value = [(1, "Toronto"), (2, "Vancouver")]
@@ -115,7 +115,7 @@ class TestGetCityMapping:
         mock_connection.cursor.return_value = mock_cursor
         mock_connection.__enter__ = MagicMock(return_value=mock_connection)
         mock_connection.__exit__ = MagicMock(return_value=False)
-        mock_conn.return_value = mock_connection
+        mock_connect.return_value = mock_connection
         
         result = _get_city_mapping()
         
@@ -129,7 +129,7 @@ class TestGetCityMapping:
 class TestExtractOpenweathermap:
     """Tests for extract_openweathermap."""
     
-    @patch('extract._get_city_mapping')
+    @patch('utils._get_city_mapping')
     @patch('extract._get_cities_to_fetch')
     @patch('extract.requests.get')
     def test_successful_extraction(self, mock_get, mock_cities_fetch, mock_mapping,
@@ -150,7 +150,7 @@ class TestExtractOpenweathermap:
         assert 2 in result  # Vancouver
         assert 3 in result  # Montreal
     
-    @patch('extract._get_city_mapping')
+    @patch('utils._get_city_mapping')
     @patch('extract._get_cities_to_fetch')
     @patch('extract.requests.get')
     def test_handles_api_error(self, mock_get, mock_cities_fetch, mock_mapping,
@@ -171,10 +171,10 @@ class TestExtractOpenweathermap:
         
         result = extract_openweathermap("weather")
         
-        # Only 2 cities succeeded
+        # 2 cities succeeded (1 failed with 500 error)
         assert len(result) == 2
     
-    @patch('extract._get_city_mapping')
+    @patch('utils._get_city_mapping')
     @patch('extract._get_cities_to_fetch')
     @patch('extract.requests.get')
     def test_handles_network_timeout(self, mock_get, mock_cities_fetch, mock_mapping,
@@ -196,10 +196,10 @@ class TestExtractOpenweathermap:
         
         result = extract_openweathermap("weather")
         
-        # 2 cities succeeded despite 1 timeout
+        # 2 cities succeeded (1 timed out)
         assert len(result) == 2
     
-    @patch('extract._get_city_mapping')
+    @patch('utils._get_city_mapping')
     @patch('extract._get_cities_to_fetch')
     @patch('extract.requests.get')
     def test_defaults_to_weather_endpoint(self, mock_get, mock_cities_fetch, mock_mapping,
@@ -219,7 +219,7 @@ class TestExtractOpenweathermap:
         call_url = mock_get.call_args[0][0]
         assert "/weather?" in call_url
     
-    @patch('extract._get_city_mapping')
+    @patch('utils._get_city_mapping')
     @patch('extract._get_cities_to_fetch')
     @patch('extract.requests.get')
     def test_forecast_endpoint(self, mock_get, mock_cities_fetch, mock_mapping,
@@ -238,7 +238,7 @@ class TestExtractOpenweathermap:
         call_url = mock_get.call_args[0][0]
         assert "/forecast?" in call_url
     
-    @patch('extract._get_city_mapping')
+    @patch('utils._get_city_mapping')
     @patch('extract._get_cities_to_fetch')
     def test_empty_cities_returns_empty_dict(self, mock_cities_fetch, mock_mapping):
         """Test that no cities produces empty result."""

@@ -96,7 +96,7 @@ def load_forecast() -> None:
         VALUES (
             %(city_id)s, %(timestamp_utc)s, %(temp_c)s, %(feels_like_c)s,
             %(pressure_hpa)s, %(humidity_pct)s, %(wind_speed_ms)s,
-            %(weather_description)s, %(raw_json)s::jsonb, %(forecast_timestamp)s, %(forecast_horizon)s
+            %(weather_description)s, NULL, %(forecast_timestamp)s, %(forecast_horizon)s
         )
         ON CONFLICT (city_id, forecast_timestamp, timestamp_utc) DO NOTHING
     """

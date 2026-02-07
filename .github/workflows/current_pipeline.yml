@@ -24,4 +24,4 @@ jobs:
           DB_PORT: ${{ secrets.PORT }}
           DB_NAME: ${{ secrets.DBNAME }}
           API_KEY: ${{ secrets.API_KEY }}
-        run: python3 current_pipeline.py
+        run: python orchestrator.py --data-types current

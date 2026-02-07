@@ -409,7 +409,7 @@ def set_high_water_mark(city: str, year: int, month: int, timestamp: datetime, d
         timestamp: Timestamp of the newest raw file that was processed
         data_type: type of weather data i.e forecast/current
     """
-    path = get_staging_path(city, year, month).parent / ".last_processed.json"
+    path = get_staging_path(city, year, month, data_type).parent / ".last_processed.json"
     path.parent.mkdir(parents=True, exist_ok=True) #ensure the parent exits
 
     try:
@@ -420,7 +420,3 @@ def set_high_water_mark(city: str, year: int, month: int, timestamp: datetime, d
         logger.error(f"Failed to set high-water mark at {path}: {e}")
 
     return None
-
-
-# if __name__ == "__main__":
-#     print(_normalize_city_name("New York"))

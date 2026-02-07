@@ -65,3 +65,6 @@ Thumbs.db
 *.orig
 *.rej
 *.patch
+
+# Data lake
+data_lake/

@@ -38,7 +38,6 @@ def extract_openweathermap(endpoint: str) -> Dict[int, dict]:
         try:
             url = (f"{config.API_BASE_URL}/{endpoint}?"
                    f"lat={lat}&lon={lon}&appid={config.OPENWEATHERMAP_API_KEY}&units=metric")
-            
             response = requests.get(url, timeout=config.API_TIMEOUT)
             
             if response.status_code != 200:
@@ -54,7 +53,7 @@ def extract_openweathermap(endpoint: str) -> Dict[int, dict]:
                     data_type = "current"
                 else:
                     data_type = "forecast"
-                write_raw(city_name, datetime.datetime.now().timestamp(), response.json(), data_type)
+                write_raw(city_name, datetime.datetime.now(), response.json(), data_type)
                 logger.info(f"Successfully wrote response for {city_name} to raw layer")
             else:
                 logger.warning(f"City {city_name} not found in mapping")
