@@ -374,7 +374,7 @@ def get_high_water_mark(city: str, year: int, month: int, data_type: str = "curr
     Returns:
         Datetime of last processed file, or None if never processed
     """
-    base = get_staging_path(city, year, month)
+    base = get_staging_path(city, year, month, data_type)
     path = base.parent / ".last_processed.json"
 
     if not path.exists():
@@ -420,3 +420,86 @@ def set_high_water_mark(city: str, year: int, month: int, timestamp: datetime, d
         logger.error(f"Failed to set high-water mark at {path}: {e}")
 
     return None
+
+
+# =============================================================================
+# CLOUD BACKEND SKELETONS (for R2/S3)
+# =============================================================================
+# Implement these for Cloudflare R2 support. Use boto3 for all S3-compatible operations.
+# Each function should match the local version's signature, but operate on the cloud.
+
+# --- Key-building helpers (return string keys, not Path objects) ---
+def _get_raw_key(city: str, timestamp: datetime, data_type: str) -> str:
+    """Return S3/R2 key for raw JSON file (e.g. 'raw/current/toronto/2026/02/06/123456.json')"""
+    raise NotImplementedError("Implement _get_raw_key")
+
+def _get_staging_key(city: str, year: int, month: int, data_type: str) -> str:
+    """Return S3/R2 key for staging Parquet file (e.g. 'staging/current/city=toronto/year=2026/month=02/data.parquet')"""
+    raise NotImplementedError("Implement _get_staging_key")
+
+def _get_hwm_key(city: str, year: int, month: int, data_type: str) -> str:
+    """Return S3/R2 key for high-water mark file (e.g. 'staging/current/city=toronto/year=2026/month=02/.last_processed.json')"""
+    raise NotImplementedError("Implement _get_hwm_key")
+
+# --- R2 backend implementations (use boto3) ---
+def _write_raw_r2(city: str, timestamp: datetime, data: dict, data_type: str):
+    """Write raw JSON to R2. Use _get_raw_key and boto3 put_object."""
+    raise NotImplementedError("Implement _write_raw_r2")
+
+def _write_staging_r2(city: str, year: int, month: int, df: pd.DataFrame, data_type: str):
+    """Write Parquet to R2. Use _get_staging_key, BytesIO, and boto3 put_object."""
+    raise NotImplementedError("Implement _write_staging_r2")
+
+def _read_staging_r2(city: str, year: int, month: int, data_type: str):
+    """Read Parquet from R2. Use _get_staging_key, boto3 get_object, BytesIO, pd.read_parquet."""
+    raise NotImplementedError("Implement _read_staging_r2")
+
+def _list_raw_files_after_r2(city: str, after_timestamp: Optional[datetime], data_type: str):
+    """List raw files in R2. Use paginator, filter by timestamp, return objects with .stem property."""
+    raise NotImplementedError("Implement _list_raw_files_after_r2")
+
+def _get_high_water_mark_r2(city: str, year: int, month: int, data_type: str):
+    """Get HWM from R2. Use _get_hwm_key, boto3 get_object, json.loads."""
+    raise NotImplementedError("Implement _get_high_water_mark_r2")
+
+def _set_high_water_mark_r2(city: str, year: int, month: int, timestamp: datetime, data_type: str):
+    """Set HWM in R2. Use _get_hwm_key, json.dumps, boto3 put_object."""
+    raise NotImplementedError("Implement _set_high_water_mark_r2")
+
+# =============================================================================
+# PUBLIC FUNCTION MODIFICATION GUIDANCE
+# =============================================================================
+# For each public function (write_raw, write_staging, read_staging, list_raw_files_after, get_high_water_mark, set_high_water_mark):
+#
+# 1. At the top of the function, add:
+#    if _backend == "r2":
+#        return _corresponding_r2_function(...)
+#    else:
+#        ...existing code...
+#
+# 2. For get_high_water_mark/set_high_water_mark, be sure to pass data_type to get_staging_path and to the R2 helpers.
+# 3. For list_raw_files_after, return a list of Path objects (local) or R2Key objects (cloud) with a .stem property for compatibility.
+# 4. You can keep the local (filesystem) code as-is for now.
+# 5. See the top of this file for backend initialization and config guidance.
+
+# Example for write_raw:
+# def write_raw(...):
+#     if _backend == "r2":
+#         return _write_raw_r2(...)
+#     ...existing code...
+
+# Example for write_staging:
+# def write_staging(...):
+#     if _backend == "r2":
+#         return _write_staging_r2(...)
+#     ...existing code...
+
+# Example for get_high_water_mark:
+# def get_high_water_mark(...):
+#     if _backend == "r2":
+#         return _get_high_water_mark_r2(...)
+#     ...existing code...
+
+# (Repeat for all public storage functions)
+
+# This pattern lets you add cloud support incrementally while keeping local dev easy.
