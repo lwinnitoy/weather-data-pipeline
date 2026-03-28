@@ -61,7 +61,7 @@ def load_weather() -> None:
         logger.error(f"pgcode: {e.pgcode}")
         if hasattr(e, 'diag'):
             logger.error(f"detail: {e.diag.message_primary}")
-        raise
+        raise psycopg2.DatabaseError("Failed to load current weather records") from e
 
 def load_forecast() -> None:
     """
@@ -112,7 +112,7 @@ def load_forecast() -> None:
         logger.error(f"pgcode: {e.pgcode}")
         if hasattr(e, 'diag'):
             logger.error(f"detail: {e.diag.message_primary}")
-        raise
+        raise psycopg2.DatabaseError("Failed to load forecast weather records") from e
 
 def _get_last_loaded_timestamp(city_id: int, data_type: str) -> Optional[datetime]:
     """

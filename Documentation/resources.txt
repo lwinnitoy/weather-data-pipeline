@@ -1,3 +1,7 @@
-openweathermap weather data api
+openweathermap weather data api (current + forecast endpoints in active scope)
 supabase postgres db
 simplemaps https://simplemaps.com/data/canada-cities canadian city data
+
+weather alerts note:
+- no reliable free-tier alerts API currently meets project requirements
+- alerts ingestion has been moved to future expansion scope

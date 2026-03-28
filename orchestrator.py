@@ -6,6 +6,7 @@ import staging_transform
 import load
 import logging
 import utils
+from storage import StorageError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,8 +39,10 @@ def run_pipeline(data_types):
             logger.info("Starting load...")
             _run_load(data_type)
             logger.info("Loading complete!")
-        except Exception as e:
-            logger.error(f"Pipline failed for {data_type}: {e}")
+        except (RuntimeError, ValueError, StorageError, OSError) as e:
+            logger.error(f"Pipeline failed for {data_type}: {e}")
+        except Exception:
+            logger.exception(f"Unexpected pipeline failure for {data_type}")
     
     logger.info("Pipeline complete")
 

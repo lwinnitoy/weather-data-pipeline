@@ -1,367 +1,219 @@
-8
+Software Requirements Specification (SRS)
+Project: Real-Time Weather Data Platform
+Version: 1.1
+Date: 2026-03-27
+Prepared by: Data Platform Team
 
-Automatic Zoom
-Software Requirements Specification (SRS) 
-Project: Real-Time Weather Data Platform 
-Version: 1.0 
-Date: 2025-12-04 
-Prepared by: Data Platform Team 
- 
-1. Introduction 
-1.1 Purpose 
-The purpose of this SRS is to define all functional, non-functional, data, and workflow 
-requirements for the Real-Time Weather Data Platform. The system collects weather data from 
-multiple OpenWeatherMap endpoints, stores raw data in an S3-compatible data lake, 
-transforms it into analytic-ready structures, and loads it into a PostgreSQL-based warehouse. 
-This document is to be consumed by backend developers, data engineers, and DevOps 
-engineers responsible for implementing the platform. 
- 
-1.2 Scope 
-The system will: 
-• Run an automated, hourly orchestration workflow for multi-city ingestion 
-• Ingest current weather, 5-day forecasts, and severe weather alerts 
-• Store raw JSON in a data lake (S3-compatible) 
-• Produce clean, normalized staging datasets in Parquet format 
-• Load analytics tables into PostgreSQL 
-• Support dashboarding via external BI tools 
-Out of scope (future phases): 
-• Real-time ingestion (<5 minute frequency) 
-• ML based anomaly detection 
-• PostGIS spatial processing 
-• Public-facing REST API 
- 
-1.3 Definitions 
-Term Definition 
-Data Lake Object storage system containing raw and staged data (JSON/Parquet). 
-Lakehouse Architecture pattern combining data lake + data warehouse tables. 
-Raw Layer Unmodified JSON API responses stored as-is. 
-Staging Layer Cleaned, normalized Parquet partitions for internal use. 
-Analytics Layer Final PostgreSQL tables optimized for BI and querying. 
-DAG Directed Acyclic Graph representing the workflow in Airflow/Prefect. 
- 
-2. Overall System Description 
-The data platform follows a modern lakehouse architecture: 
-• Raw API responses stored in S3 
-• Python ETL performing transformations 
-• Parquet staging for reproducibility 
-• PostgreSQL warehouse for analytics 
-• Orchestration with Airflow or Prefect 
-• Optional dbt layer for further modeling 
-The system must support: 
-• Multiple cities (configurable) 
-• Multiple data sources (current, forecast, alerts) 
-• Historical tracking 
-• Automatic scheduling and retries 
- 
-3. Functional Requirements 
-3.1 Extraction Requirements 
-The system shall: 
-FR-1 
-Ingest data from the following OpenWeatherMap endpoints: 
-• /weather – current weather 
-• /forecast – 5-day, 3-hour intervals 
-• /onecall – for alerts 
-FR-2 
-Support ingestion for multiple cities defined in a configuration table. 
-FR-3 
-Write a raw JSON copy of every API response into the data lake: 
-data_lake/raw/{city}/{year}/{month}/{day}/{timestamp}.json 
-FR-4 
-Record API metadata including: 
-• latency 
-• status code 
-• payload size 
-FR-5 
-Retry failed API calls up to 3 times with exponential backoff. 
- 
-3.2 Transformation Requirements 
-The system shall: 
-FR-6 
-Normalize all weather attributes including temperature, pressure, humidity, wind, and 
-descriptions. 
-FR-7 
-Convert timestamps to: 
-• UTC 
-• city-specific local timezone 
-FR-8 
-Flatten nested API fields into a tabular format for: 
-• weather_history 
-• weather_forecast 
-• weather_alerts 
-FR-9 
-Store all transformed data in Parquet format, partitioned by: 
-data_lake/staging/city={city}/year={YYYY}/month={MM}/day={DD}/ 
-FR-10 
-Validate raw data before loading: 
-• Required fields present 
-• Timestamps valid 
-• Values within safe ranges 
-• No duplicates 
- 
-3.3 Loading Requirements 
-The system shall: 
-FR-11 
-Load clean data into PostgreSQL tables: 
-• weather_history 
-• weather_forecast 
-• weather_alerts 
-• cities (reference) 
-FR-12 
-Use bulk operations (COPY or batch inserts). 
-FR-13 
-Maintain historical data without overwriting. 
-FR-14 
-Ensure idempotency — no duplicate loads if the same DAG run is retried. 
- 
-3.4 Orchestration Requirements 
-The system shall: 
-FR-15 
-Run an hourly DAG managed through Airflow or Prefect. 
-FR-16 
-Log run metadata: 
-• start/end time 
-• row counts 
-• errors and warnings 
-FR-17 
-Trigger notifications for failed runs. 
- 
-3.5 Monitoring Requirements 
-The system shall detect: 
-FR-18 
-Missing or null fields from the API. 
-FR-19 
-Schema drift (unexpected new fields). 
-FR-20 
-Stale data (no updates for >2 hours per city). 
-FR-21 
-Row count anomalies (too few or too many entries). 
- 
-4. Non-Functional Requirements 
-Category Requirement 
-Scalability Must support 50+ cities and >1M historical rows 
-Performance End-to-end ETL must run <60 seconds for 10 cities 
-Reliability 99% successful DAG runs; retries on every step 
-Security No credentials in code; env vars or secrets manager only 
-Cost Efficiency  Must operate on cloud free-tiers when possible 
-Extensibility New data sources should be addable without redesign 
-Observability Logs must include API, ETL, and load performance metrics 
- 
-5. Data Dictionary 
-5.1 cities Table 
-Stores metadata for all tracked cities. 
-Column Type Description 
-id INT PK Unique city id 
-city_name TEXT City name 
-country_code  CHAR(2)  ISO-3166-1 (e.g., CA) 
-api_city_id INT OWM city ID 
-timezone TEXT IANA tz (e.g., America/Vancouver) 
- 
-5.2 weather_history Table 
-Column Type Description 
-id BIGSERIAL PK  Unique row 
-city_id INT FK Reference to cities 
-timestamp_utc TIMESTAMP UTC timestamp 
-timestamp_local TIMESTAMP Local timestamp 
-temp_c FLOAT Temperature 
-feels_like_c FLOAT Feels-like 
-pressure_hpa INT Pressure 
-humidity_pct INT Humidity 
-wind_speed_ms FLOAT Wind speed 
-weather_description  TEXT Summary 
-raw_json JSONB Raw payload 
- 
-5.3 weather_forecast Table 
-Same fields as history + forecast metadata. 
-Column Description 
-forecast_timestamp  Timestamp for forecasted time 
-forecast_horizon Hours ahead 
- 
-5.4 weather_alerts Table 
-Stores severe weather alerts from OneCall API. 
-Column Description 
-event Alert name 
-sender Issuing agency 
-start_utc Start 
-end_utc End 
-severity Advisory/Watch/Warning 
-description  Alert summary 
- 
-6. ETL Workflow Specification 
-6.1 Extract Phase 
-Steps: 
-1. Load city configuration. 
-2. For each city, call /weather, /forecast, /onecall. 
-3. Write each JSON response to the raw lake. 
-4. Validate payload structure. 
- 
-6.2 Transform Phase 
-Steps: 
-1. Read all raw JSON collected within the DAG run. 
-2. Normalize fields (temp, wind, humidity, timestamp). 
-3. Construct tabular DataFrames for each target table. 
-4. Write Parquet files to the staging layer. 
- 
-6.3 Load Phase 
-Steps: 
-1. Read Parquet files from staging. 
-2. Deduplicate records. 
-3. COPY into PostgreSQL. 
-4. Log row counts + errors. 
- 
-7. Acceptance Criteria 
-• Pipeline ingests all cities every hour 
-• Raw + staging + warehouse layers all populated 
-• No missing required fields 
-• No duplicate timestamps for a city 
-• PostgreSQL warehouse matches schema definitions in this SRS 
-• DAG completes in under 60 seconds (10-city baseline) 
- 
+1. Introduction
+1.1 Purpose
+This SRS defines functional and non-functional requirements for the current implementation of the Real-Time Weather Data Platform. The system ingests weather data from OpenWeatherMap, stores raw payloads in a lake layer, transforms data into partitioned Parquet staging datasets, and loads analytics tables into PostgreSQL.
+
+1.2 Scope
+In scope (current roadmap):
+- Run scheduled, multi-city ingestion workflows
+- Ingest current weather and 5-day forecast data
+- Store raw JSON in a local or S3-compatible data lake
+- Produce clean staging Parquet datasets
+- Load analytics tables into PostgreSQL
+- Support dashboarding through external BI tools
+
+Out of scope (future expansion):
+- Weather alerts ingestion
+- Real-time ingestion (<5 minute frequency)
+- ML-based anomaly detection
+- PostGIS spatial processing
+- Public-facing REST API
+
+1.3 Definitions
+- Data Lake: Object storage containing raw and staged data (JSON/Parquet)
+- Lakehouse: Architecture combining data lake and analytics warehouse layers
+- Raw Layer: Unmodified JSON API responses
+- Staging Layer: Cleaned and normalized Parquet partitions
+- Analytics Layer: PostgreSQL tables optimized for query and BI
+- DAG: Directed Acyclic Graph workflow (future Airflow/Prefect target)
+
+2. Overall System Description
+The platform follows a practical lakehouse architecture:
+- Raw API responses in lake storage
+- Python ETL modules for extract, transform, and load
+- Parquet staging for reproducibility and reload capability
+- PostgreSQL analytics layer for downstream querying
+- Current orchestration through CLI + GitHub Actions schedules
+
+Current data sources:
+- Current weather endpoint (`/weather`)
+- Forecast endpoint (`/forecast`)
+
+Deferred data source:
+- Alerts endpoint (`/onecall`) moved to future expansion due free-tier API limitations
+
+3. Functional Requirements
+3.1 Extraction Requirements
+FR-1: Ingest data from OpenWeatherMap endpoints:
+- `/weather` (current weather)
+- `/forecast` (5-day, 3-hour intervals)
+
+FR-2: Support ingestion for multiple cities loaded from the `cities` table.
+
+FR-3: Write raw JSON API responses into the data lake:
+- `data_lake/raw/{data_type}/{city}/{year}/{month}/{day}/{timestamp}.json`
+
+FR-4: Continue processing remaining cities if one city/API call fails.
+
+FR-5: Retry failed API calls with exponential backoff (planned enhancement).
+
+3.2 Transformation Requirements
+FR-6: Normalize weather attributes (temperature, pressure, humidity, wind, weather text).
+
+FR-7: Standardize timestamps in UTC in staging and analytics tables.
+
+FR-8: Produce tabular outputs for:
+- `weather_history`
+- `weather_forecast`
+
+FR-9: Store transformed data as partitioned Parquet files:
+- `data_lake/staging/{data_type}/city={city}/year={YYYY}/month={MM}/data.parquet`
+
+FR-10: Prevent duplicates in staging merges using deterministic keys.
+
+3.3 Loading Requirements
+FR-11: Load clean data into PostgreSQL tables:
+- `weather_history`
+- `weather_forecast`
+- `cities` (reference)
+
+FR-12: Use bulk operations (`executemany` now, COPY acceptable future optimization).
+
+FR-13: Preserve historical data (append-only behavior).
+
+FR-14: Ensure idempotent loads on retries (DB constraints + conflict handling).
+
+3.4 Orchestration Requirements
+FR-15: Support scheduled execution for both current and forecast pipelines.
+
+FR-16: Log run progress and failures.
+
+FR-17: Add run-level metrics (row counts, durations) as future enhancement.
+
+3.5 Monitoring Requirements
+FR-18: Detect malformed or missing required fields in transform stage (partially implemented).
+
+FR-19: Detect stale data and schema drift (planned).
+
+FR-20: Detect row count anomalies by city and data type (planned).
+
+4. Non-Functional Requirements
+- Scalability: Support dozens of cities and large historical datasets
+- Performance: Keep ETL runtime practical for free-tier compute targets
+- Reliability: Robust error handling, retries for transient failures (planned)
+- Security: Secrets from environment variables or CI secrets
+- Cost Efficiency: Favor free-tier services and minimal operational overhead
+- Extensibility: Add new data sources without redesigning storage/load architecture
+
+5. Data Dictionary
+5.1 `cities`
+- Stores metadata for tracked cities and API mapping fields.
+
+5.2 `weather_history`
+- Current weather observations with UTC timestamp and weather metrics.
+
+5.3 `weather_forecast`
+- Forecast observations including `forecast_timestamp` and `forecast_horizon`.
+
+5.4 Deferred Table (`weather_alerts`)
+- Table exists as exploratory schema, but population is deferred to future expansion.
+
+6. ETL Workflow Specification
+6.1 Extract
+1. Load cities from PostgreSQL.
+2. Call `/weather` or `/forecast` for each city.
+3. Persist raw JSON payloads to raw layer.
+
+6.2 Transform
+1. Read raw files incrementally using per-partition high-water marks.
+2. Convert raw JSON into staging records.
+3. Merge with existing staging files and deduplicate.
+4. Write Parquet outputs and update high-water marks.
+
+6.3 Load
+1. Read staging partitions.
+2. Map city names to city IDs.
+3. Insert into PostgreSQL with `ON CONFLICT DO NOTHING`.
+
+7. Acceptance Criteria (Current Scope)
+- Current and forecast pipelines run on schedule.
+- Raw, staging, and analytics layers are populated for supported data types.
+- No duplicate records for uniqueness keys in analytics tables.
+- Test suite passes in CI.
+
 8. Implementation Roadmap
-
-This SRS represents the complete vision for the platform. Implementation is divided into four 
-phases to ensure incremental progress and maintainability.
-
 8.1 Phase 1: Core ETL Foundation
+Status: Complete
+
+Completed:
+- Modular extract, staging transform, load layers
+- Multi-city current-weather ingestion
+- PostgreSQL load pipeline and seeded city reference data
+- Scheduled GitHub Actions workflow for current data
+
+8.2 Phase 2: Forecast + Operational Hardening
 Status: In Progress
-Timeline: 2-3 weeks
 
-Goals:
-• Establish clean separation of extract, transform, and load modules
-• Implement cities table with normalization
-• Support multi-city current weather ingestion
-• Load data directly to PostgreSQL (weather_history table)
-• Automated hourly GitHub Actions workflow
-• Basic error handling and logging
+Completed:
+- Forecast extraction, staging, and loading
+- Forecast schedule workflow (every 3 hours)
+- Idempotency constraints and conflict-safe inserts
 
-Deliverables:
-✓ extract.py with OpenWeatherMap current weather API
-✓ transform.py with unit conversions and timezone handling
-✓ load.py with PostgreSQL COPY or batch inserts
-✓ cities table seeded with initial cities
-✓ weather_history table matching schema (Section 5.2)
-✓ GitHub Actions workflow for hourly execution
+Remaining:
+- Retry/backoff implementation for transient failures
+- Stronger transform validation gates
+- Better run metadata and observability
 
-Acceptance:
-• Pipeline successfully runs hourly for 5+ cities
-• Data visible in PostgreSQL
-• No duplicate records for same timestamp + city
-• Clean separation between E/T/L modules
+8.3 Phase 3: Lakehouse Maturity
+Status: In Progress
 
-8.2 Phase 2: Multiple Data Sources (Current)
+Completed:
+- Raw JSON lake layer
+- Partitioned Parquet staging layer
+- Local/R2 pluggable storage backend
+- Incremental processing via high-water marks
+
+Remaining:
+- API metadata capture (latency, payload size, status)
+- Improved partition lifecycle and compaction strategy
+
+8.4 Phase 4: Production-Grade Platform
 Status: Planned
-Timeline: 3-4 weeks
 
-Goals:
-• Add 5-day weather forecast ingestion
-• Add weather alerts ingestion (OneCall API)
-• Implement separate workflows for different update frequencies
-• Create weather_forecast and weather_alerts tables
-• Add idempotency handling to prevent duplicate loads
+Planned deliverables:
+- Airflow/Prefect orchestration
+- Data quality monitoring and anomaly detection
+- Notifications, SLIs/SLOs, and dashboards
 
-Deliverables:
-• forecast_pipeline.py with 3-hour update schedule
-• alerts_pipeline.py with appropriate update schedule
-• weather_forecast table (Section 5.3)
-• weather_alerts table (Section 5.4)
-• Separate GitHub Actions workflows per data source
-• ON CONFLICT handling for idempotency
+8.5 Future Expansion Track
+Status: Deferred by design
 
-Acceptance:
-• Current weather: hourly
-• Forecast: every 3 hours
-• Alerts: hourly (conditional on availability)
-• All three tables populated with historical data
-• No duplicate entries on workflow retries
+Deferred features:
+- Weather alerts ingestion and analytics
+- Public API
+- Streaming ingestion
+- ML-based anomaly detection
 
-8.3 Phase 3: Lakehouse Architecture
-Status: Future
-Timeline: 4-6 weeks
+9. Current Status Summary (2026-03-27)
+- Core ETL and forecast ingestion are operational.
+- Lakehouse layers are implemented (raw and staging) and integrated with analytics load.
+- CI and schedule automation are in place.
+- Weather alerts have been explicitly moved to future expansion due external API constraints on free tiers.
 
-Goals:
-• Implement S3-compatible data lake (MinIO or AWS S3)
-• Store raw JSON responses in partitioned structure
-• Create Parquet staging layer with partitioning
-• Maintain PostgreSQL as analytics layer
-• Add data lake → warehouse sync process
+10. Architectural Decisions (Recorded)
+AD-1: Keep weather alerts out of current scope until a suitable free alert source is available.
 
-Deliverables:
-• S3/MinIO bucket configuration
-• Raw layer: data_lake/raw/{city}/{YYYY}/{MM}/{DD}/{timestamp}.json
-• Staging layer: data_lake/staging/city={city}/year={YYYY}/month={MM}/
-• Modified extract.py to write raw JSON to lake
-• New staging_transform.py to produce Parquet files
-• Load layer reads from Parquet instead of in-memory DataFrames
-• API metadata tracking (latency, status codes, payload size)
+AD-2: Use modular Python files (`extract.py`, `staging_transform.py`, `load.py`) instead of a monolith.
 
-Acceptance:
-• Every API response stored as raw JSON
-• Staging Parquet files partitioned correctly
-• PostgreSQL loads from staging layer
-• Historical reproducibility: can re-transform old raw data
-• Meets FR-3, FR-4, FR-9 requirements
+AD-3: Use repository pattern in `storage.py` to support local and R2 backends with the same interface.
 
-8.4 Phase 4: Production-Grade Features
-Status: Future
-Timeline: 6-8 weeks
+AD-4: Use Parquet staging + high-water marks for reproducible, incremental processing.
 
-Goals:
-• Migrate to Airflow or Prefect for orchestration
-• Implement comprehensive data quality checks
-• Add monitoring, alerting, and observability
-• Implement exponential backoff retries
-• Add dbt transformations (optional semantic layer)
-• Create BI dashboard integration
+AD-5: Enforce idempotency with DB uniqueness constraints and conflict-safe inserts.
 
-Deliverables:
-• Airflow DAGs replacing GitHub Actions workflows
-• Data validation with Great Expectations or custom checks
-• Schema drift detection (FR-19)
-• Stale data monitoring (FR-20)
-• Row count anomaly detection (FR-21)
-• Notification system for pipeline failures (FR-17)
-• Retry logic with exponential backoff (FR-5)
-• Performance metrics dashboard
-• Optional: dbt Gold Layer models
-
-Acceptance:
-• All functional requirements (FR-1 through FR-21) met
-• All non-functional requirements satisfied
-• 99% successful DAG runs over 30-day period
-• <60 second end-to-end ETL for 10 cities
-• Automated alerts on failures
-• Comprehensive observability
-
-8.5 Phase 5: Advanced Enhancements (Optional)
-Status: Future Consideration
-
-Potential additions beyond core requirements:
-• Near-real-time streaming using Kafka/Kinesis
-• Integration of radar / satellite imagery
-• PostGIS spatial analysis capabilities
-• Public-facing REST API
-• ML-based anomaly detection
-• Advanced BI dashboards with Superset or Looker Studio
-• Historical weather pattern analysis
-• Predictive weather modeling
-
-Note: These enhancements are exploratory and not required for core platform functionality.
-
- 
-9. Current Status Summary
-
-As of 2025-12-13:
-• Phase 1: ✅ COMPLETE (100%)
-• Phase 2: 0% complete
-• Phase 3: 0% complete  
-• Phase 4: 0% complete
-
-Next Immediate Steps:
-1. Complete extract.py refactor with multi-city support
-2. Implement transform.py with clean dictionary-based transformations
-3. Implement load.py with batch insert operations
-4. Seed cities table with initial dataset
-5. Test end-to-end pipeline locally
-6. Deploy updated workflow to GitHub Actions
-7. Verify hourly execution for 1 week
-8. Document Phase 1 completion
-9. Begin Phase 2 planning
+AD-6: Use GitHub Actions schedules now; keep Airflow/Prefect as future orchestration upgrade.

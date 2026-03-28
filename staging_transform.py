@@ -101,6 +101,8 @@ def process_partition_current(city: str, year: int, month: int) -> int:
     records = []
     for path in filtered_list:
         raw = read_raw_json(path)
+        if not raw:
+            continue
         ts = datetime.fromtimestamp(int(path.stem), tz=timezone.utc)
         record = transform_current_to_record(city=city, raw_data=raw, timestamp=ts)
         if record:
@@ -180,6 +182,8 @@ def process_partition_forecast(city: str, year: int, month: int) -> int:
     records = []
     for path in filtered_list:
         raw = read_raw_json(path)
+        if not raw:
+            continue
         ts = datetime.fromtimestamp(int(path.stem), tz=timezone.utc)
         record = transform_forecast_to_records(city=city, raw_data=raw, fetched_at=ts)
         if record:

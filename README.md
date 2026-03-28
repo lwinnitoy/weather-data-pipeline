@@ -1,71 +1,126 @@
 # Real-Time Weather Data Pipeline
 
-A beginner-friendly data engineering project that collects real-time weather data using the OpenWeatherMap API, processes it with Python, and stores it in a cloud-hosted PostgreSQL database. This project demonstrates a basic ETL (Extract, Transform, Load) pipeline and includes optional data analysis tools for querying and visualizing the stored data.
+A portfolio-focused data engineering project that ingests weather data from OpenWeatherMap, persists raw API payloads to a data lake, transforms them into partitioned staging datasets, and loads analytics-ready tables into PostgreSQL.
 
----
+Current supported data sources:
+- Current weather (`/weather`)
+- 5-day forecast (`/forecast`)
+
+Weather alerts are intentionally deferred to a future expansion because there is no reliable free API tier that fits project requirements for immediate alerts.
+
+## Current Architecture
+
+Pipeline flow:
+1. Extract API data for each configured city from PostgreSQL `cities` table
+2. Write raw JSON to data lake (`data_lake/raw/...`)
+3. Transform raw files into clean Parquet partitions (`data_lake/staging/...`)
+4. Load from staging into PostgreSQL analytics tables with idempotent inserts
+
+Key implementation decisions:
+- Storage backend abstraction supports local filesystem and Cloudflare R2 (`STORAGE_BACKEND=local|r2`)
+- Incremental processing uses high-water marks per city and partition
+- Idempotency is enforced with DB uniqueness constraints plus `ON CONFLICT DO NOTHING`
+- Scheduling is currently handled via GitHub Actions workflows
 
 ## Features
 
-- Collects real-time weather data from OpenWeatherMap API
-- Extracts weather metrics: temperature, pressure, humidity, wind speed, and weather description
-- Transforms data using pandas with timezone-aware timestamps (UTC and Pacific Time)
-- Loads data into PostgreSQL database using efficient COPY command
-- Stores data for Victoria, BC, Canada
-- Includes error handling for API failures and database connection issues
-- Supports environment variable configuration via .env file or GitHub Secrets
-
----
+- Multi-city ingestion driven by `cities` table
+- Current weather and forecast ETL paths
+- Raw and staging lakehouse layers
+- Partitioned Parquet staging outputs
+- PostgreSQL load layer with duplicate protection
+- Local and R2 object-storage support
+- Automated CI test workflow and scheduled pipeline workflows
 
 ## Tech Stack
 
-- **Python** (3.8+)
-- **OpenWeatherMap API** – Data source
-- **PostgreSQL** – Cloud-hosted via [Supabase](https://supabase.com)
-- **pandas** – For data processing
-- **psycopg2-binary** – For DB connection
-- **python-dotenv** – For environment variable management
-- **GitHub Actions** – For automation (optional)
+- Python 3.10+
+- OpenWeatherMap API
+- PostgreSQL (Supabase-compatible)
+- pandas
+- psycopg2-binary
+- boto3 (R2/S3-compatible backend)
+- GitHub Actions
 
----
+## Project Layout
 
-## Installation
+- `extract.py`: API extraction + raw writes
+- `staging_transform.py`: raw-to-staging transforms + high-water marks
+- `load.py`: staging-to-warehouse load
+- `storage.py`: local/R2 storage repository layer
+- `orchestrator.py`: CLI orchestration entry point
+- `migrations/`: SQL schema and idempotency migrations
 
-1. Clone this repo:
-   ```bash
-   git clone https://github.com/lwinnitoy/weather-data-pipeline.git
-   cd weather-data-pipeline
+## Setup
 
-2. Create and activate a virtual environment:
-   python -m venv venv
-   source venv/bin/activate  (On Windows: venv\Scripts\activate)
-
+1. Clone and enter the repo.
+2. Create a virtual environment and activate it.
 3. Install dependencies:
-    pip install -r requirements.txt
 
-4. Set up environment variables in a .env file:
-    API_KEY=your_openweathermap_api_key
-    DB_USER=your_postgres_username
-    DB_PASSWORD=your_postgres_password
-    DB_HOST=your_postgres_host
-    DB_PORT=your_postgres_port
-    DB_NAME=your_database_name
-    PGSSLMODE=require
-
----
-
-## Usage
-
-Run the ETL script manually:
 ```bash
-python etl_pipeline.py
+pip install -r requirements.txt
 ```
 
-The script will:
-- Extract weather data from OpenWeatherMap API for Victoria, CA
-- Transform the data (temperature, pressure, humidity, wind speed, weather description)
-- Load the data into a PostgreSQL database table named `weather_history`
+4. Configure environment variables in `.env`:
 
-Note: The dashboard is not yet implemented.
+```bash
+API_KEY=your_openweathermap_api_key
+
+DB_USER=your_postgres_user
+DB_PASSWORD=your_postgres_password
+DB_HOST=your_postgres_host
+DB_PORT=5432
+DB_NAME=your_postgres_db
+PGSSLMODE=require
+
+STORAGE_BACKEND=local
+DATA_LAKE_ROOT=data_lake
+
+# Required only when STORAGE_BACKEND=r2
+S3_ACCESS_KEY=...
+S3_SECRET_KEY=...
+S3_ENDPOINT_URL=...
+S3_BUCKET_NAME=...
+```
+
+## Running the Pipeline
+
+Run both supported data types:
+
+```bash
+python orchestrator.py --data-types current forecast
+```
+
+Run one data type:
+
+```bash
+python orchestrator.py --data-types current
+python orchestrator.py --data-types forecast
+```
+
+Run tests:
+
+```bash
+python -m pytest -q
+```
+
+## Automation
+
+- Hourly current-weather pipeline: `.github/workflows/current_pipeline.yml`
+- Forecast pipeline every 3 hours: `.github/workflows/forecast_pipeline.yml`
+- Test CI on push/PR: `.github/workflows/tests.yml`
+
+## Roadmap
+
+Near-term:
+- Add retry/backoff around API and transient storage failures
+- Add stricter data validation checks in transform layer
+- Add richer run-level metrics and observability
+
+Future expansion:
+- Weather alerts ingestion (deferred until a suitable free API is available)
+- Airflow/Prefect orchestration
+- BI/dashboard layer
 
 
 

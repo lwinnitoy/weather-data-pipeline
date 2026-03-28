@@ -86,4 +86,4 @@ def _get_cities_to_fetch() -> List[Tuple[str, float, float]]:
     except psycopg2.Error as e:
         logger.error(f"Database error fetching cities: {e}")
         logger.error(f"pgcode: {e.pgcode}")
-        raise
+        raise psycopg2.DatabaseError("Failed to fetch cities from database") from e

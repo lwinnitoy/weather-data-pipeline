@@ -27,6 +27,13 @@ API_TIMEOUT = 10  # seconds
 DATA_LAKE_ROOT = Path(os.getenv("DATA_LAKE_ROOT", "data_lake"))
 RAW_LAYER_DIR = "raw"
 STAGING_LAYER_DIR = "staging"
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local")  # "local" or "s3"
 
 # Application settings
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# Cloudflare s3 configuration
+R2_ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
+R2_SECRET_KEY = os.getenv("S3_SECRET_KEY")
+R2_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL")
+R2_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")

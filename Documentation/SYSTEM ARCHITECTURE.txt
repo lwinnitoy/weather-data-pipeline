@@ -1,101 +1,123 @@
+SYSTEM ARCHITECTURE DOCUMENT
+Real-Time Weather Data Platform
+Version: 1.1
+Date: 2026-03-27
 
-3
+1. Overview
+This platform is a Python-based weather data pipeline that ingests OpenWeatherMap data, stores raw responses in a data lake, transforms them to partitioned Parquet staging datasets, and loads analytics-ready records into PostgreSQL.
 
-Automatic Zoom
-SYSTEM ARCHITECTURE DOCUMENT Real-Time 
-Weather Data Platform 
-1. Overview 
-This system is a real-time data pipeline that ingests weather data from the OpenWeatherMap 
-API, processes and transforms it using Python, and stores both raw and cleaned weather data in 
-a cloud-hosted PostgreSQL database and an S3-compatible data lake. 
-The platform is designed following modern data engineering principles: 
-• Modular ingestion 
-• Scalable transformations 
-• Lakehouse pattern (Raw → Staging → Analytics) 
-• Orchestration with Airflow/Prefect 
-• Data quality validation 
-• Automated scheduling 
-• Separation of compute, storage, and orchestration 
-This architecture supports multiple data sources, multi-city ingestion, historical tracking, 
-analytics, and dashboarding while being deployable on free-tier cloud services. 
- 
-2. High-Level Architecture Diagram 
- 
- 
-3. Functional Requirements 
-Extraction 
-• Fetch weather data for multiple cities 
-• Pull: 
-o Current weather 
-o 5-day / 3-hour forecast 
-o Weather alerts 
-• Store raw JSON responses into the data lake 
-Transformation 
-• Normalize temperature, wind, and pressure units 
-• Convert timestamps to: 
-o UTC 
-o Local timezone for each city 
-• Validate required fields 
-• Flatten nested JSON fields (alerts) 
-• Produce clean, denormalized analytical tables 
-Loading 
-• Insert cleaned data into PostgreSQL in: 
-o weather_history 
-o weather_forecast 
-o weather_alerts 
-• Use bulk inserts or COPY for efficiency 
-• Maintain historical records (no overwrites) 
-Orchestration 
-• Hourly DAG triggered by Airflow or Prefect 
-• Retry on API failures 
-• Notify on pipeline failure 
-• Log run metadata (start/end time, rows processed) 
-Monitoring 
-• Detect missing fields from API 
-• Detect stale data (if API fails for many hours) 
-• Validate temperature ranges (sanity checks) 
-• Detect schema drift 
-• Record pipeline metrics: 
-o API latency 
-o Rows inserted 
-o Error counts 
- 
-4. Non-Functional Requirements 
-Requirement Description 
-Scalability Can support dozens of cities; Parquet partitions support large volumes 
-Data Quality Must be validated with automated tests 
-Reliability Retries + logging ensure robust runs 
-Cost Efficiency  Built entirely using free-tier components 
-Extensibility New data sources or cities can be added without redesign 
- 
-5. Components Detail 
-5.1 Extract Layer 
-Module: extract.py 
-Features: 
-• Query API endpoints for: 
-o /weather 
-o /forecast 
-o /alerts (inside OneCall API) 
-• Parameterized by city list 
-• Logs latency, status codes, and payload size 
-• Writes raw responses to: 
-o /data_lake/raw/YYYY/MM/DD/city/*.json 
- 
-5.2 Transform Layer 
-Module: transform.py 
-Transforms include: 
-• Flattening nested objects (main, wind, weather[0]) 
-• Converting: 
-o Kelvin → Celsius 
-o UTC timestamps 
-• Creating unique primary keys 
-• Extracting alert severity + event type 
-• Handling missing fields 
-• Creating Parquet partitions: 
-• /data_lake/staging/city=Victoria/year=2025/month=12/day=04/*.parquet 
- 
-5.3 Load Layer 
-Module: load.py 
-Loads data into PostgreSQL using: 
-• psycopg2 COPY 
-• Bulk inserts 
+The architecture follows these principles:
+- Modular ETL design
+- Lakehouse flow (Raw -> Staging -> Analytics)
+- Storage abstraction (local filesystem or Cloudflare R2)
+- Idempotent loading into analytics tables
+- Simple, reliable scheduled automation via GitHub Actions
+
+Current supported data sources:
+- Current weather
+- 5-day / 3-hour forecast
+
+Deferred to future expansion:
+- Weather alerts ingestion
+
+2. High-Level Architecture
+Data flow:
+1. Extract API payloads per city from OpenWeatherMap
+2. Persist raw JSON payloads to `data_lake/raw`
+3. Transform incrementally into Parquet partitions in `data_lake/staging`
+4. Load analytics rows into PostgreSQL tables with duplicate-safe inserts
+
+Control plane:
+- `orchestrator.py` coordinates extract, staging transform, and load
+- GitHub Actions schedules:
+	- current pipeline hourly
+	- forecast pipeline every 3 hours
+
+3. Functional Scope
+Extraction:
+- Fetch weather data for multiple cities from PostgreSQL `cities` table
+- Pull endpoints:
+	- `/weather`
+	- `/forecast`
+- Write raw JSON responses to lake storage
+
+Transformation:
+- Flatten nested weather objects into tabular records
+- Standardize weather metrics and timestamps
+- Merge with existing staging data and deduplicate
+- Track high-water marks for incremental processing
+
+Loading:
+- Insert data into PostgreSQL:
+	- `weather_history`
+	- `weather_forecast`
+- Use bulk insert pattern (`executemany`)
+- Enforce idempotency with uniqueness constraints + `ON CONFLICT DO NOTHING`
+
+4. Non-Functional Characteristics
+- Scalability: partitioned storage supports growing history and city count
+- Reliability: fault isolation by city and by data type in orchestrator
+- Cost efficiency: designed for free-tier friendly infrastructure
+- Extensibility: storage and data-type layers are modular
+- Testability: unit tests cover extract/transform/load/storage/orchestrator
+
+5. Component Details
+5.1 Extract Layer
+Module: `extract.py`
+
+Responsibilities:
+- Load target cities from PostgreSQL
+- Call OpenWeatherMap for current/forecast
+- Handle per-city errors without aborting entire batch
+- Persist raw payloads via storage repository layer
+
+5.2 Staging Transform Layer
+Module: `staging_transform.py`
+
+Responsibilities:
+- Read raw JSON by city and partition
+- Convert raw responses to normalized records
+- Merge with prior staging data and remove duplicates
+- Write Parquet and update high-water marks
+
+5.3 Load Layer
+Module: `load.py`
+
+Responsibilities:
+- Read staging partitions
+- Map city names to city IDs
+- Insert into analytics tables using conflict-safe SQL
+- Validate suspicious timestamp gaps before loading
+
+5.4 Storage Repository Layer
+Module: `storage.py`
+
+Responsibilities:
+- Provide a single interface for local and R2 storage operations
+- Manage raw and staging paths/keys
+- Manage high-water mark persistence
+- Normalize storage errors (`StorageError`, `TransientError`)
+
+5.5 Orchestration Layer
+Module: `orchestrator.py`
+
+Responsibilities:
+- Execute data types (`current`, `forecast`) end-to-end
+- Keep per-data-type processing isolated
+- Emit structured run logs
+
+6. Operational Decisions
+OD-1: Keep weather alerts out of active implementation scope until a reliable free API is available.
+
+OD-2: Use GitHub Actions schedules first, defer Airflow/Prefect migration until monitoring and retry requirements justify extra operational complexity.
+
+OD-3: Use raw + staging persistence before warehouse load to support reproducibility and safer replay.
+
+OD-4: Keep idempotency in database constraints to prevent duplicate insertions during retries/re-runs.
+
+7. Deferred/Future Expansions
+- Weather alerts ingestion and analytics model
+- Exponential backoff and standardized retry policy
+- Data quality framework (schema drift, stale data, anomaly detection)
+- Airflow/Prefect migration
+- Dashboard service and curated BI layer

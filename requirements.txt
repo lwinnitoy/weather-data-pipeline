@@ -7,3 +7,4 @@ tzdata
 backports.zoneinfo; python_version < "3.9"
 pyarrow
 pytest
+boto3

@@ -19,4 +19,4 @@ def _get_city_mapping() -> Dict[str, int]:
                 
     except psycopg2.Error as e:
         logger.error(f"Database error fetching city mapping: {e}")
-        raise
+        raise psycopg2.DatabaseError("Failed to fetch city mapping from database") from e

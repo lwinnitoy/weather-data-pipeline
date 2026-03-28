@@ -15,16 +15,80 @@ Path Conventions:
 """
 import json
 import logging
+import boto3
+from botocore.exceptions import ClientError
+from io import BytesIO
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 import pandas as pd
 import config
+import clients
 
 logger = logging.getLogger(__name__)
 
+# Storage exception hierarchy
+class StorageError(Exception):
+    """Base class for storage-related errors.
+
+    Use this for unexpected operational failures (network, permissions,
+    decoding/parsing errors). Callers should treat this as fatal for the
+    current operation and decide whether to retry or abort.
+    """
+
+
+class NotFoundError(StorageError):
+    """Indicates a requested object was not found in storage.
+
+    This is used to distinguish the normal 'missing' case from other
+    operational failures. Functions reading data may return ``None`` for
+    missing objects or raise this exception depending on the public API
+    contract — see function docstrings for details.
+    """
+
+
+class TransientError(StorageError):
+    """Indicates a transient/retriable failure (e.g. network timeout).
+
+    Callers should implement retry/backoff when catching this error.
+    """
+
+
+class InvalidDataTypeError(ValueError):
+    """Raised when data_type is not one of the supported pipeline values."""
+
+
+# S3/R2 client is provided by the `clients` module (clients.s3)
+
+
+def _s3_body_to_bytes(body_obj) -> bytes:
+    """Normalize an S3 response `Body` to raw bytes.
+
+    Accepts common shapes returned by boto3/mocks:
+    - StreamingBody or file-like objects with `.read()`
+    - `bytes` or `bytearray`
+    - objects convertible to `bytes`
+
+    Raises `StorageError` for unexpected types so callers get a clear
+    operational error instead of a cryptic AttributeError.
+    """
+    if hasattr(body_obj, "read"):
+        return body_obj.read()
+    if isinstance(body_obj, (bytes, bytearray)):
+        return bytes(body_obj)
+    try:
+        return bytes(body_obj)
+    except Exception as e:
+        raise StorageError("Unexpected S3 body type") from e
+
 
 # =============================================================================
+# LOCAL BACKEND
+# Uses local filesystem as datalake
+# =============================================================================
+
+
+
 # PATH BUILDING FUNCTIONS
 # These construct paths without touching the filesystem
 # =============================================================================
@@ -47,8 +111,9 @@ def get_raw_path(city: str, timestamp: datetime, data_type: str = "current") -> 
     """
     #ensure data type is correct
     if data_type not in ["current", "forecast"]:
-        logger.error("Data type not supported")
-        return None
+        raise InvalidDataTypeError(
+            f"Unsupported data_type='{data_type}'. Expected 'current' or 'forecast'."
+        )
     
     normalized_city = _normalize_city_name(city)
     unix_ts = int(timestamp.timestamp())
@@ -83,8 +148,9 @@ def get_staging_path(city: str, year: int, month: int, data_type: str = "current
     """
     #ensure data type is correct
     if data_type not in ["current", "forecast"]:
-        logger.error("Data type not supported")
-        return None
+        raise InvalidDataTypeError(
+            f"Unsupported data_type='{data_type}'. Expected 'current' or 'forecast'."
+        )
 
     normalized_city = _normalize_city_name(city)
     staging_path = (
@@ -115,12 +181,12 @@ def _normalize_city_name(city: str) -> str:
     return city.lower().replace(" ", "_")
 
 
-# =============================================================================
+
 # RAW LAYER OPERATIONS
 # Write-once, read-many pattern for preserving API responses
 # =============================================================================
 
-def write_raw(city: str, timestamp: datetime, data: dict, data_type: str = "current") -> Path:
+def write_raw(city: str, timestamp: datetime, data: dict, data_type: str = "current") -> Optional[Path | str]:
     """
     Write raw API response to the data lake.
     
@@ -139,6 +205,9 @@ def write_raw(city: str, timestamp: datetime, data: dict, data_type: str = "curr
     Raises:
         IOError: If write fails
     """
+    if config.STORAGE_BACKEND == "r2":
+        return _write_raw_r2(city, timestamp, data, data_type)
+    
     path = get_raw_path(city, timestamp, data_type)
     path.parent.mkdir(parents=True, exist_ok=True)  # Create parent directories
     
@@ -155,12 +224,12 @@ def write_raw(city: str, timestamp: datetime, data: dict, data_type: str = "curr
         tmp_path.rename(path)
         logger.debug(f"Wrote raw file: {path}")
         
-    except Exception as e:
+    except (OSError, TypeError, ValueError) as e:
         # Cleanup temp file on failure
         if tmp_path.exists():
             tmp_path.unlink()
-        logger.error(f"Failed to write raw file: {e}")
-        raise  # Re-raise so caller knows it failed
+        logger.error(f"Failed to write raw file {path}: {e}")
+        raise StorageError(f"Failed to write raw file: {path}") from e
     
     return path
 
@@ -249,6 +318,9 @@ def list_raw_files_after(city: str, after_timestamp: Optional[datetime] = None, 
     Returns:
         List of Paths to raw JSON files, sorted by timestamp ascending
     """
+    if config.STORAGE_BACKEND == "r2":
+        return _list_raw_files_after_r2(city, after_timestamp, data_type)
+    
     paths = []
     normalized_city = _normalize_city_name(city)
     base = (
@@ -269,23 +341,24 @@ def list_raw_files_after(city: str, after_timestamp: Optional[datetime] = None, 
     else:
         #filtered output
         # Compares every file with after_timestamp in unix. 
-        # This would extremely inefficient but since scale is small it's applicable.
+        # This would be extremely inefficient but since scale is small it's applicable.
         after_unix = int(after_timestamp.timestamp())
 
         for p in base.rglob("*.json"):
             if after_unix < int(p.stem):
                 paths.append(p)
 
-    paths.sort(key=lambda p: p.name)
+    paths.sort(key=lambda p: int(p.stem))
     return paths
 
 
-# =============================================================================
+
+
 # STAGING LAYER OPERATIONS
 # Parquet files optimized for analytics
 # =============================================================================
 
-def write_staging(city: str, year: int, month: int, df: pd.DataFrame, data_type: str = "current") -> Path:
+def write_staging(city: str, year: int, month: int, df: pd.DataFrame, data_type: str = "current") -> Optional[Path | str]:
     """
     Write a DataFrame to the staging layer as Parquet.
     
@@ -301,6 +374,9 @@ def write_staging(city: str, year: int, month: int, df: pd.DataFrame, data_type:
     Returns:
         Path where Parquet file was written
     """
+    if config.STORAGE_BACKEND == "r2":
+        return _write_staging_r2(city, year, month, df, data_type)
+    
     path = get_staging_path(city, year, month, data_type)
     path.parent.mkdir(parents=True, exist_ok=True)  # Create parent directories
     
@@ -315,12 +391,12 @@ def write_staging(city: str, year: int, month: int, df: pd.DataFrame, data_type:
         tmp_path.rename(path)
         logger.debug(f"Wrote staging file: {path}")
         
-    except Exception as e:
+    except (OSError, ValueError, ImportError) as e:
         # Cleanup temp file on failure
         if tmp_path.exists():
             tmp_path.unlink()
-        logger.error(f"Failed to write staging file: {e}")
-        raise  # Re-raise so caller knows it failed
+        logger.error(f"Failed to write staging file {path}: {e}")
+        raise StorageError(f"Failed to write staging file: {path}") from e
     
     return path
     
@@ -340,6 +416,9 @@ def read_staging(city: str, year: int, month: int, data_type: str = "current") -
     Returns:
         DataFrame if file exists, None otherwise
     """
+    if config.STORAGE_BACKEND == "r2":
+        return _read_staging_r2(city, year, month, data_type)
+    
     path = get_staging_path(city, year, month, data_type)
     
     if not path.exists():
@@ -349,12 +428,14 @@ def read_staging(city: str, year: int, month: int, data_type: str = "current") -
         df = pd.read_parquet(path)
         logger.debug(f"Read staging file: {path}")
         return df
-    except Exception as e:
+    except FileNotFoundError:
+        # File may disappear between exists() and read_parquet() under concurrent writes.
+        return None
+    except (OSError, ValueError, ImportError) as e:
         logger.error(f"Failed to read staging file {path}: {e}")
         return None
 
 
-# =============================================================================
 # HIGH-WATER MARK TRACKING
 # Enables incremental processing by tracking last processed timestamp
 # =============================================================================
@@ -374,6 +455,9 @@ def get_high_water_mark(city: str, year: int, month: int, data_type: str = "curr
     Returns:
         Datetime of last processed file, or None if never processed
     """
+    if config.STORAGE_BACKEND == "r2":
+        return _get_high_water_mark_r2(city, year, month, data_type)
+    
     base = get_staging_path(city, year, month, data_type)
     path = base.parent / ".last_processed.json"
 
@@ -390,13 +474,13 @@ def get_high_water_mark(city: str, year: int, month: int, data_type: str = "curr
             
             return datetime.fromtimestamp(ts)
         
-    except Exception as e:
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
         logger.error(f"Failed to get high-water mark at {base}: {e}")
         return None
     
     
 
-def set_high_water_mark(city: str, year: int, month: int, timestamp: datetime, data_type: str = "current") -> None:
+def set_high_water_mark(city: str, year: int, month: int, timestamp: datetime, data_type: str = "current") -> Optional[Path]:
     """
     Update the high-water mark after processing.
     
@@ -409,6 +493,9 @@ def set_high_water_mark(city: str, year: int, month: int, timestamp: datetime, d
         timestamp: Timestamp of the newest raw file that was processed
         data_type: type of weather data i.e forecast/current
     """
+    if config.STORAGE_BACKEND == "r2":
+        return _set_high_water_mark_r2(city, year, month, timestamp, data_type)
+    
     path = get_staging_path(city, year, month, data_type).parent / ".last_processed.json"
     path.parent.mkdir(parents=True, exist_ok=True) #ensure the parent exits
 
@@ -416,90 +503,200 @@ def set_high_water_mark(city: str, year: int, month: int, timestamp: datetime, d
         with path.open("w") as file:
             json.dump({"timestamp": timestamp.timestamp()}, file)
     
-    except Exception as e:
+    except (OSError, TypeError, ValueError) as e:
         logger.error(f"Failed to set high-water mark at {path}: {e}")
+        raise StorageError("Failed to serialize high-water mark") from e
 
-    return None
+    return path
 
 
 # =============================================================================
-# CLOUD BACKEND SKELETONS (for R2/S3)
+# CLOUD BACKEND (for R2/S3)
 # =============================================================================
-# Implement these for Cloudflare R2 support. Use boto3 for all S3-compatible operations.
-# Each function should match the local version's signature, but operate on the cloud.
+
+# KEY-BUILDING HELPERS
+# return string keys, not Path objects
+# =============================================================================
 
 # --- Key-building helpers (return string keys, not Path objects) ---
-def _get_raw_key(city: str, timestamp: datetime, data_type: str) -> str:
+def _get_raw_key(city: str, timestamp: datetime, data_type: str) -> Optional[str]:
     """Return S3/R2 key for raw JSON file (e.g. 'raw/current/toronto/2026/02/06/123456.json')"""
-    raise NotImplementedError("Implement _get_raw_key")
 
-def _get_staging_key(city: str, year: int, month: int, data_type: str) -> str:
+    #ensure data type is correct
+    if data_type not in ["current", "forecast"]:
+        raise InvalidDataTypeError(
+            f"Unsupported data_type='{data_type}'. Expected 'current' or 'forecast'."
+        )
+    
+    return f"{config.RAW_LAYER_DIR}/{data_type}/{_normalize_city_name(city)}/{timestamp.year}/{timestamp.month:02d}/{timestamp.day:02d}/{int(timestamp.timestamp())}.json"
+
+
+
+def _get_staging_key(city: str, year: int, month: int, data_type: str) -> Optional[str]:
     """Return S3/R2 key for staging Parquet file (e.g. 'staging/current/city=toronto/year=2026/month=02/data.parquet')"""
-    raise NotImplementedError("Implement _get_staging_key")
+    
+    if data_type not in ["current", "forecast"]:
+        raise InvalidDataTypeError(
+            f"Unsupported data_type='{data_type}'. Expected 'current' or 'forecast'."
+        )
+    
+    return f"{config.STAGING_LAYER_DIR}/{data_type}/city={_normalize_city_name(city)}/year={year}/month={month:02d}/data.parquet"
 
-def _get_hwm_key(city: str, year: int, month: int, data_type: str) -> str:
+
+
+def _get_hwm_key(city: str, year: int, month: int, data_type: str) -> Optional[str]:
     """Return S3/R2 key for high-water mark file (e.g. 'staging/current/city=toronto/year=2026/month=02/.last_processed.json')"""
-    raise NotImplementedError("Implement _get_hwm_key")
+   
+    if data_type not in ["current", "forecast"]:
+        raise InvalidDataTypeError(
+            f"Unsupported data_type='{data_type}'. Expected 'current' or 'forecast'."
+        )
+    
+    return f"{config.STAGING_LAYER_DIR}/{data_type}/city={_normalize_city_name(city)}/year={year}/month={month:02d}/.last_processed.json"
 
-# --- R2 backend implementations (use boto3) ---
-def _write_raw_r2(city: str, timestamp: datetime, data: dict, data_type: str):
+
+# R2 BACKEND READ/WRITES
+# Uses boto3
+# =============================================================================
+
+def _write_raw_r2(city: str, timestamp: datetime, data: dict, data_type: str) -> Optional[str]:
     """Write raw JSON to R2. Use _get_raw_key and boto3 put_object."""
-    raise NotImplementedError("Implement _write_raw_r2")
+    
+    key = _get_raw_key(city, timestamp, data_type)
+    try:
+        clients.s3.put_object(Bucket=config.R2_BUCKET_NAME, Key=key, Body=json.dumps(data))
+        logger.info(f"Wrote raw file to R2: {key}")
+    except ClientError as e:
+        logger.error(f"Failed to upload raw file to R2 key={key}: {e}")
+        raise TransientError("S3 put_object failed for raw payload") from e
+    except (TypeError, ValueError) as e:
+        logger.error(f"Failed to upload file to R2: error: {e}")
+        raise StorageError("Failed to serialize raw payload") from e
+    return key
 
-def _write_staging_r2(city: str, year: int, month: int, df: pd.DataFrame, data_type: str):
+
+
+
+def _write_staging_r2(city: str, year: int, month: int, df: pd.DataFrame, data_type: str) -> Optional[str]:
     """Write Parquet to R2. Use _get_staging_key, BytesIO, and boto3 put_object."""
-    raise NotImplementedError("Implement _write_staging_r2")
+    
+    key = _get_staging_key(city, year, month, data_type)
+    try:
+        # Write DataFrame to in-memory bytes buffer
+        buffer = BytesIO()
+        df.to_parquet(buffer, index=False)
+        buffer.seek(0)  # Reset buffer position
 
-def _read_staging_r2(city: str, year: int, month: int, data_type: str):
+        clients.s3.put_object(Bucket=config.R2_BUCKET_NAME, Key=key, Body=buffer.getvalue())
+        logger.info(f"Wrote staging file to R2: {key}")
+    except ClientError as e:
+        logger.error(f"Failed to upload staging file to R2 key={key}: {e}")
+        raise TransientError("S3 put_object failed for staging payload") from e
+    except (ValueError, OSError, ImportError) as e:
+        logger.error(f"Failed to upload file to R2: error: {e}")
+        raise StorageError("Failed to encode parquet payload") from e
+    return key
+
+
+
+
+def _read_staging_r2(city, year, month, data_type) -> Optional[pd.DataFrame]:
     """Read Parquet from R2. Use _get_staging_key, boto3 get_object, BytesIO, pd.read_parquet."""
-    raise NotImplementedError("Implement _read_staging_r2")
+    
+    key = _get_staging_key(city, year, month, data_type)
+    try:
+        response = clients.s3.get_object(Bucket=config.R2_BUCKET_NAME, Key=key)
+        body = _s3_body_to_bytes(response["Body"])
+        buffer = BytesIO(body)
+        buffer.seek(0)
+        return pd.read_parquet(buffer)
+    
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        if code in ("NoSuchKey", "404"):
+            return None
+        raise TransientError("S3 get_object failed") from e
+    except (ValueError, OSError, ImportError) as e:
+        logger.error(f"Failed to read files from R2: error: {e}")
+        raise StorageError("Failed to decode object") from e
 
-def _list_raw_files_after_r2(city: str, after_timestamp: Optional[datetime], data_type: str):
-    """List raw files in R2. Use paginator, filter by timestamp, return objects with .stem property."""
-    raise NotImplementedError("Implement _list_raw_files_after_r2")
 
-def _get_high_water_mark_r2(city: str, year: int, month: int, data_type: str):
+
+def _list_raw_files_after_r2(city: str, after_timestamp: Optional[datetime], data_type: str) -> List[Path]:
+    """List raw files in R2. Use paginator, filter by timestamp, return Path-like objects with .stem property."""
+    paginator = clients.s3.get_paginator("list_objects_v2")
+
+    objects = []
+    try:
+        prefix = f"{config.RAW_LAYER_DIR}/{data_type}/{_normalize_city_name(city)}/"
+        for page in paginator.paginate(Bucket=config.R2_BUCKET_NAME, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                key = obj.get("Key")
+                if not key:
+                    continue
+
+                pkey = Path(key)
+                try:
+                    ts = int(pkey.stem)
+                except ValueError:
+                    logger.debug(f"Skipping non-timestamp key: {key}")
+                    continue
+
+                if after_timestamp is None or ts > int(after_timestamp.timestamp()):
+                    objects.append(pkey)
+    except ClientError as e:
+        logger.error(f"Failed to list raw files from R2: error: {e}")
+        raise TransientError("S3 list_objects_v2 failed") from e
+    except (ValueError, OSError) as e:
+        logger.error(f"Failed to list raw files from R2: error: {e}")
+        raise StorageError("Failed to decode object") from e
+
+    #safer to explicitly sort by int stem
+    objects.sort(key=lambda pkey: int(pkey.stem))
+    return objects
+
+
+
+def _get_high_water_mark_r2(city, year, month, data_type) -> Optional[datetime]:
     """Get HWM from R2. Use _get_hwm_key, boto3 get_object, json.loads."""
-    raise NotImplementedError("Implement _get_high_water_mark_r2")
+    hwm_key = _get_hwm_key(city, year, month, data_type)
 
-def _set_high_water_mark_r2(city: str, year: int, month: int, timestamp: datetime, data_type: str):
+    try:
+        response = clients.s3.get_object(Bucket=config.R2_BUCKET_NAME, Key=hwm_key)
+        body = _s3_body_to_bytes(response["Body"])
+        data = json.loads(body)
+        ts = data.get("timestamp")
+        if ts is None:
+            return None
+        return datetime.fromtimestamp(ts)
+    except ClientError as e:
+        if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
+            return None
+        logger.error(f"Failed to read HWM from R2: {hwm_key}, error: {e}")
+        raise StorageError("Failed to retrieve HWM from R2") from e
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
+        logger.error(f"Failed to read file: {hwm_key}, error: {e}")
+        raise StorageError("Failed to decode object") from e
+
+    
+
+def _set_high_water_mark_r2(city: str, year: int, month: int, timestamp: datetime, data_type: str) -> Optional[Path]:
     """Set HWM in R2. Use _get_hwm_key, json.dumps, boto3 put_object."""
-    raise NotImplementedError("Implement _set_high_water_mark_r2")
+    hwm_key = _get_hwm_key(city, year, month, data_type)
 
-# =============================================================================
-# PUBLIC FUNCTION MODIFICATION GUIDANCE
-# =============================================================================
-# For each public function (write_raw, write_staging, read_staging, list_raw_files_after, get_high_water_mark, set_high_water_mark):
-#
-# 1. At the top of the function, add:
-#    if _backend == "r2":
-#        return _corresponding_r2_function(...)
-#    else:
-#        ...existing code...
-#
-# 2. For get_high_water_mark/set_high_water_mark, be sure to pass data_type to get_staging_path and to the R2 helpers.
-# 3. For list_raw_files_after, return a list of Path objects (local) or R2Key objects (cloud) with a .stem property for compatibility.
-# 4. You can keep the local (filesystem) code as-is for now.
-# 5. See the top of this file for backend initialization and config guidance.
+    try:
+        clients.s3.put_object(Bucket=config.R2_BUCKET_NAME, Key=hwm_key, Body=json.dumps({"timestamp": timestamp.timestamp()}))
+        logger.info(f"Wrote HWM to R2: {hwm_key}")
+    except ClientError as e:
+        logger.error(f"Failed to upload HWM to R2: error: {e}")
+        raise TransientError("S3 put_object failed for high-water mark") from e
+    except (TypeError, ValueError) as e:
+        logger.error(f"Failed to upload file to R2: error: {e}")
+        raise StorageError("Failed to serialize high-water mark") from e
+    
+    if not hwm_key:
+        return None
+    else:
+        return Path(hwm_key)
+    
 
-# Example for write_raw:
-# def write_raw(...):
-#     if _backend == "r2":
-#         return _write_raw_r2(...)
-#     ...existing code...
-
-# Example for write_staging:
-# def write_staging(...):
-#     if _backend == "r2":
-#         return _write_staging_r2(...)
-#     ...existing code...
-
-# Example for get_high_water_mark:
-# def get_high_water_mark(...):
-#     if _backend == "r2":
-#         return _get_high_water_mark_r2(...)
-#     ...existing code...
-
-# (Repeat for all public storage functions)
-
-# This pattern lets you add cloud support incrementally while keeping local dev easy.
