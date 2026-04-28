@@ -19,6 +19,10 @@ def _parquet_bytes_from_df(df: pd.DataFrame) -> bytes:
     return buf.getvalue()
 
 
+def _client_error(code: str) -> ClientError:
+    return ClientError({"Error": {"Code": code, "Message": "error"}}, "MockOp")
+
+
 def test_write_and_read_staging_r2(monkeypatch):
     # Arrange: mock s3 client on the storage module
     mock_client = Mock()
@@ -179,3 +183,41 @@ def test_set_and_get_high_water_mark_r2(monkeypatch):
     got = storage._get_high_water_mark_r2(city, year, month, "current")
     assert isinstance(got, datetime)
     assert got.timestamp() == pytest.approx(ts.timestamp(), rel=1e-6)
+
+
+def test_write_raw_r2_transient_error_raises_transient(monkeypatch):
+    mock_client = Mock()
+    mock_client.put_object.side_effect = _client_error("SlowDown")
+    monkeypatch.setattr(clients, "s3", mock_client, raising=False)
+
+    with pytest.raises(storage.TransientError):
+        storage._write_raw_r2("Toronto", datetime(2026, 2, 3, 4, 5, 6), {"temp": 1}, "current")
+
+
+def test_write_raw_r2_non_transient_error_raises_storage_error(monkeypatch):
+    mock_client = Mock()
+    mock_client.put_object.side_effect = _client_error("AccessDenied")
+    monkeypatch.setattr(clients, "s3", mock_client, raising=False)
+
+    with pytest.raises(storage.StorageError):
+        storage._write_raw_r2("Toronto", datetime(2026, 2, 3, 4, 5, 6), {"temp": 1}, "current")
+
+
+def test_read_staging_r2_non_transient_error_raises_storage_error(monkeypatch):
+    mock_client = Mock()
+    mock_client.get_object.side_effect = _client_error("AccessDenied")
+    monkeypatch.setattr(clients, "s3", mock_client, raising=False)
+
+    with pytest.raises(storage.StorageError):
+        storage._read_staging_r2("Toronto", 2026, 2, "current")
+
+
+def test_list_raw_files_after_r2_transient_error_raises_transient(monkeypatch):
+    mock_client = Mock()
+    paginator = Mock()
+    paginator.paginate.side_effect = _client_error("InternalError")
+    mock_client.get_paginator.return_value = paginator
+    monkeypatch.setattr(clients, "s3", mock_client, raising=False)
+
+    with pytest.raises(storage.TransientError):
+        storage._list_raw_files_after_r2("Toronto", None, "current")

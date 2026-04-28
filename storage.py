@@ -24,6 +24,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 import config
 import clients
+from retry import is_transient_s3_error
 
 logger = logging.getLogger(__name__)
 
@@ -567,8 +568,12 @@ def _write_raw_r2(city: str, timestamp: datetime, data: dict, data_type: str) ->
         clients.s3.put_object(Bucket=config.R2_BUCKET_NAME, Key=key, Body=json.dumps(data))
         logger.info(f"Wrote raw file to R2: {key}")
     except ClientError as e:
-        logger.error(f"Failed to upload raw file to R2 key={key}: {e}")
-        raise TransientError("S3 put_object failed for raw payload") from e
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        logger.error(f"Failed to upload raw file to R2 key={key}: {error_code}: {e}")
+        if is_transient_s3_error(error_code):
+            raise TransientError(f"Transient S3 error: {error_code}") from e
+        else:
+            raise StorageError(f"Non-transient S3 error: {error_code}") from e
     except (TypeError, ValueError) as e:
         logger.error(f"Failed to upload file to R2: error: {e}")
         raise StorageError("Failed to serialize raw payload") from e
@@ -586,12 +591,15 @@ def _write_staging_r2(city: str, year: int, month: int, df: pd.DataFrame, data_t
         buffer = BytesIO()
         df.to_parquet(buffer, index=False)
         buffer.seek(0)  # Reset buffer position
-
         clients.s3.put_object(Bucket=config.R2_BUCKET_NAME, Key=key, Body=buffer.getvalue())
         logger.info(f"Wrote staging file to R2: {key}")
     except ClientError as e:
-        logger.error(f"Failed to upload staging file to R2 key={key}: {e}")
-        raise TransientError("S3 put_object failed for staging payload") from e
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        logger.error(f"Failed to upload staging file to R2 key={key}: {error_code}: {e}")
+        if is_transient_s3_error(error_code):
+            raise TransientError(f"Transient S3 error: {error_code}") from e
+        else:
+            raise StorageError(f"Non-transient S3 error: {error_code}") from e
     except (ValueError, OSError, ImportError) as e:
         logger.error(f"Failed to upload file to R2: error: {e}")
         raise StorageError("Failed to encode parquet payload") from e
@@ -612,10 +620,14 @@ def _read_staging_r2(city, year, month, data_type) -> Optional[pd.DataFrame]:
         return pd.read_parquet(buffer)
     
     except ClientError as e:
-        code = e.response["Error"]["Code"]
-        if code in ("NoSuchKey", "404"):
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        if error_code in ("NoSuchKey", "404"):
             return None
-        raise TransientError("S3 get_object failed") from e
+        logger.error(f"Failed to read staging file from R2 key={key}: {error_code}: {e}")
+        if is_transient_s3_error(error_code):
+            raise TransientError(f"Transient S3 error: {error_code}") from e
+        else:
+            raise StorageError(f"Non-transient S3 error: {error_code}") from e
     except (ValueError, OSError, ImportError) as e:
         logger.error(f"Failed to read files from R2: error: {e}")
         raise StorageError("Failed to decode object") from e
@@ -645,8 +657,12 @@ def _list_raw_files_after_r2(city: str, after_timestamp: Optional[datetime], dat
                 if after_timestamp is None or ts > int(after_timestamp.timestamp()):
                     objects.append(pkey)
     except ClientError as e:
-        logger.error(f"Failed to list raw files from R2: error: {e}")
-        raise TransientError("S3 list_objects_v2 failed") from e
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        logger.error(f"Failed to list raw files from R2: {error_code}: {e}")
+        if is_transient_s3_error(error_code):
+            raise TransientError(f"Transient S3 error: {error_code}") from e
+        else:
+            raise StorageError(f"Non-transient S3 error: {error_code}") from e
     except (ValueError, OSError) as e:
         logger.error(f"Failed to list raw files from R2: error: {e}")
         raise StorageError("Failed to decode object") from e
@@ -670,10 +686,14 @@ def _get_high_water_mark_r2(city, year, month, data_type) -> Optional[datetime]:
             return None
         return datetime.fromtimestamp(ts)
     except ClientError as e:
-        if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        if error_code in ("NoSuchKey", "404"):
             return None
-        logger.error(f"Failed to read HWM from R2: {hwm_key}, error: {e}")
-        raise StorageError("Failed to retrieve HWM from R2") from e
+        logger.error(f"Failed to read HWM from R2: {hwm_key}: {error_code}: {e}")
+        if is_transient_s3_error(error_code):
+            raise TransientError(f"Transient S3 error: {error_code}") from e
+        else:
+            raise StorageError(f"Non-transient S3 error: {error_code}") from e
     except (json.JSONDecodeError, TypeError, ValueError) as e:
         logger.error(f"Failed to read file: {hwm_key}, error: {e}")
         raise StorageError("Failed to decode object") from e
@@ -688,8 +708,12 @@ def _set_high_water_mark_r2(city: str, year: int, month: int, timestamp: datetim
         clients.s3.put_object(Bucket=config.R2_BUCKET_NAME, Key=hwm_key, Body=json.dumps({"timestamp": timestamp.timestamp()}))
         logger.info(f"Wrote HWM to R2: {hwm_key}")
     except ClientError as e:
-        logger.error(f"Failed to upload HWM to R2: error: {e}")
-        raise TransientError("S3 put_object failed for high-water mark") from e
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        logger.error(f"Failed to upload HWM to R2: {error_code}: {e}")
+        if is_transient_s3_error(error_code):
+            raise TransientError(f"Transient S3 error: {error_code}") from e
+        else:
+            raise StorageError(f"Non-transient S3 error: {error_code}") from e
     except (TypeError, ValueError) as e:
         logger.error(f"Failed to upload file to R2: error: {e}")
         raise StorageError("Failed to serialize high-water mark") from e

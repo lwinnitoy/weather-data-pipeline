@@ -7,8 +7,9 @@ from typing import Dict, List, Tuple
 import logging
 import config
 import utils
-from storage import write_raw
+from storage import write_raw, TransientError as StorageTransientError
 import datetime as datetime
+from retry import RetryError, run_with_retry, is_retryable_http_status
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -18,6 +19,47 @@ logger = logging.getLogger(__name__)
 def _get_db_connection():
     """Create and return a database connection."""
     return psycopg2.connect(**config.DATABASE)
+
+@run_with_retry
+def _get_response(lat, lon, endpoint):
+    """Fetch weather data from OpenWeatherMap API.
+    
+    Args:
+        lat: Latitude
+        lon: Longitude
+        endpoint: API endpoint ("weather" or "forecast")
+    
+    Returns:
+        requests.Response object
+    
+    Raises:
+        RetryError: On transient failures (timeout, connection errors, retryable HTTP status)
+    """
+    try:
+        url = (
+            f"{config.API_BASE_URL}/{endpoint}?"
+            f"lat={lat}&lon={lon}&appid={config.OPENWEATHERMAP_API_KEY}&units=metric"
+        )
+        response = requests.get(url, timeout=config.API_TIMEOUT)
+        
+        # Classify HTTP status codes: retry on 408, 429, 5xx
+        if is_retryable_http_status(response.status_code):
+            raise RetryError(
+                f"Retryable HTTP {response.status_code}: {response.text[:100]}"
+            )
+        
+        return response
+        
+    except (TimeoutError, ConnectionError, ConnectionAbortedError) as e:
+        # Transient network errors: retry
+        raise RetryError(f"Network error: {e}") from e
+    except requests.Timeout as e:
+        # requests library timeout: retry
+        raise RetryError(f"Request timeout: {e}") from e
+    except requests.ConnectionError as e:
+        # requests library connection error: retry
+        raise RetryError(f"Connection error: {e}") from e
+
 
 def extract_openweathermap(endpoint: str) -> Dict[int, dict]:
     """
@@ -36,9 +78,7 @@ def extract_openweathermap(endpoint: str) -> Dict[int, dict]:
 
     for city_name, lat, lon in cities:
         try:
-            url = (f"{config.API_BASE_URL}/{endpoint}?"
-                   f"lat={lat}&lon={lon}&appid={config.OPENWEATHERMAP_API_KEY}&units=metric")
-            response = requests.get(url, timeout=config.API_TIMEOUT)
+            response = _get_response(lat, lon, endpoint)
             
             if response.status_code != 200:
                 logger.warning(f"API error for {city_name}: {response.status_code}")
@@ -48,22 +88,31 @@ def extract_openweathermap(endpoint: str) -> Dict[int, dict]:
             if city_id:
                 city_data[city_id] = response.json()
 
-                #write raw data to data lake
-                if endpoint == "weather":
-                    data_type = "current"
-                else:
-                    data_type = "forecast"
-                write_raw(city_name, datetime.datetime.now(), response.json(), data_type)
-                logger.info(f"Successfully wrote response for {city_name} to raw layer")
+                # Write raw data to data lake with retry on transient storage errors
+                try:
+                    if endpoint == "weather":
+                        data_type = "current"
+                    else:
+                        data_type = "forecast"
+                    write_raw(city_name, datetime.datetime.now(), response.json(), data_type)
+                    logger.info(f"Successfully wrote response for {city_name} to raw layer")
+                except StorageTransientError as e:
+                    logger.error(f"Transient storage error writing {city_name}: {e}. Skipping.")
+                    continue
             else:
                 logger.warning(f"City {city_name} not found in mapping")
                 
+        except RetryError as e:
+            logger.error(f"Failed to fetch {city_name} after retries: {e}")
+            continue  # Skip this city, continue with others
         except requests.RequestException as e:
-            logger.error(f"Network error fetching {city_name}: {e}")
+            logger.error(f"Non-retryable network error fetching {city_name}: {e}")
             continue  # Continue with other cities
-    
-    logger.info(f"Successfully fetched weather for {len(city_data)} cities")
+        except Exception as e:
+            logger.error(f"Unexpected error fetching {city_name}: {e}", exc_info=True)
+            continue
 
+    logger.info(f"Successfully fetched weather for {len(city_data)} cities")
     return city_data
 
 

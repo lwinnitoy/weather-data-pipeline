@@ -8,6 +8,10 @@ Run with: pytest tests/test_extract.py -v
 import pytest
 from unittest.mock import patch, MagicMock
 import requests
+import time
+import tenacity.nap as tenacity_nap
+
+from retry import RETRY_MAX_ATTEMPTS
 
 from extract import (
     extract_openweathermap,
@@ -165,13 +169,14 @@ class TestExtractOpenweathermap:
         success_response.json.return_value = {"main": {}, "weather": [], "wind": {}}
         
         error_response = MagicMock()
-        error_response.status_code = 500
+        error_response.status_code = 404
+        error_response.text = "not found"
         
         mock_get.side_effect = [success_response, error_response, success_response]
         
         result = extract_openweathermap("weather")
         
-        # 2 cities succeeded (1 failed with 500 error)
+        # 2 cities succeeded (1 failed with 404 error)
         assert len(result) == 2
     
     @patch('utils._get_city_mapping')
@@ -198,6 +203,60 @@ class TestExtractOpenweathermap:
         
         # 2 cities succeeded (1 timed out)
         assert len(result) == 2
+
+    @patch('utils._get_city_mapping')
+    @patch('extract._get_cities_to_fetch')
+    @patch('extract.requests.get')
+    def test_retries_on_retryable_status(self, mock_get, mock_cities_fetch, mock_mapping,
+                                         mock_cities, mock_city_mapping, mock_api_response, monkeypatch):
+        """Test that retryable HTTP status codes trigger retries and can succeed."""
+        mock_cities_fetch.return_value = [mock_cities[0]]
+        mock_mapping.return_value = {"Toronto": 1}
+
+        sleeps = []
+        sleep_recorder = lambda s: sleeps.append(s)
+        monkeypatch.setattr(tenacity_nap, "sleep", sleep_recorder)
+        monkeypatch.setattr(time, "sleep", sleep_recorder)
+
+        retry_response = MagicMock()
+        retry_response.status_code = 503
+        retry_response.text = "server error"
+
+        success_response = MagicMock()
+        success_response.status_code = 200
+        success_response.json.return_value = mock_api_response
+
+        mock_get.side_effect = [retry_response, retry_response, success_response]
+
+        result = extract_openweathermap("weather")
+
+        assert mock_get.call_count == 3
+        assert result == {1: mock_api_response}
+
+    @patch('utils._get_city_mapping')
+    @patch('extract._get_cities_to_fetch')
+    @patch('extract.requests.get')
+    def test_retries_exhausted_on_retryable_status(self, mock_get, mock_cities_fetch, mock_mapping,
+                                                   mock_cities, mock_city_mapping, monkeypatch):
+        """Test that retries exhaust and the city is skipped for retryable errors."""
+        mock_cities_fetch.return_value = [mock_cities[0]]
+        mock_mapping.return_value = {"Toronto": 1}
+
+        sleeps = []
+        sleep_recorder = lambda s: sleeps.append(s)
+        monkeypatch.setattr(tenacity_nap, "sleep", sleep_recorder)
+        monkeypatch.setattr(time, "sleep", sleep_recorder)
+
+        retry_response = MagicMock()
+        retry_response.status_code = 503
+        retry_response.text = "server error"
+
+        mock_get.return_value = retry_response
+
+        result = extract_openweathermap("weather")
+
+        assert mock_get.call_count == RETRY_MAX_ATTEMPTS
+        assert result == {}
     
     @patch('utils._get_city_mapping')
     @patch('extract._get_cities_to_fetch')
