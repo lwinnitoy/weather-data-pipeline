@@ -8,7 +8,8 @@ import config
 import utils
 from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
-import storage
+from storage import list_raw_files_after, read_staging
+
 logger = logging.getLogger(__name__)
 
 
@@ -173,7 +174,15 @@ def _extract_staging(data_type) -> List[Dict]:
     """extracts records from staging layer"""
     city_map = utils._get_city_mapping()
     now = datetime.now(timezone.utc)
+    end_month = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
     records = []
+
+    def _month_start(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return datetime(dt.year, dt.month, 1, tzinfo=timezone.utc)
 
     for city in city_map.keys():
         city_id = city_map[city]
@@ -181,20 +190,22 @@ def _extract_staging(data_type) -> List[Dict]:
         try:
             timestamp = _get_last_loaded_timestamp(city_id, data_type)
             _validate_timestamp_gap(timestamp, city_id)
+            
         except RuntimeError as e:
             logger.error(f"Last loaded timestamp error: {e}")
             continue
         
         if timestamp is None:
-            raw_files = storage.list_raw_files_after(city, None, data_type)
+            raw_files = list_raw_files_after(city, None, data_type)
             if not raw_files:
                 logger.warning(f"No raw files found for {city}, skipping")
                 continue
             timestamp = datetime.fromtimestamp(int(raw_files[0].stem), tz=timezone.utc)
 
-        # Iterate over partitions after last load
-        while timestamp < now:
-            df = storage.read_staging(city, timestamp.year, timestamp.month, data_type)
+        # Iterate over partitions by month (avoids skipping current month)
+        cursor = _month_start(timestamp)
+        while cursor <= end_month:
+            df = read_staging(city, cursor.year, cursor.month, data_type)
             if df is not None:
                 df["city_id"] = city_id
                 # Rename staging column to match DB schema
@@ -207,7 +218,7 @@ def _extract_staging(data_type) -> List[Dict]:
                 records.extend(df.to_dict(orient="records"))
             
             # Increment months
-            timestamp += relativedelta(months=1)
+            cursor += relativedelta(months=1)
             
     return records
 

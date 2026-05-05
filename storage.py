@@ -24,7 +24,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 import config
 import clients
-from retry import is_transient_s3_error
+from retry import is_transient_s3_error, run_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -560,6 +560,7 @@ def _get_hwm_key(city: str, year: int, month: int, data_type: str) -> Optional[s
 # Uses boto3
 # =============================================================================
 
+@run_with_retry(retry_exceptions=(TransientError,))
 def _write_raw_r2(city: str, timestamp: datetime, data: dict, data_type: str) -> Optional[str]:
     """Write raw JSON to R2. Use _get_raw_key and boto3 put_object."""
     
@@ -582,6 +583,7 @@ def _write_raw_r2(city: str, timestamp: datetime, data: dict, data_type: str) ->
 
 
 
+@run_with_retry(retry_exceptions=(TransientError,))
 def _write_staging_r2(city: str, year: int, month: int, df: pd.DataFrame, data_type: str) -> Optional[str]:
     """Write Parquet to R2. Use _get_staging_key, BytesIO, and boto3 put_object."""
     
@@ -608,6 +610,7 @@ def _write_staging_r2(city: str, year: int, month: int, df: pd.DataFrame, data_t
 
 
 
+@run_with_retry(retry_exceptions=(TransientError,))
 def _read_staging_r2(city, year, month, data_type) -> Optional[pd.DataFrame]:
     """Read Parquet from R2. Use _get_staging_key, boto3 get_object, BytesIO, pd.read_parquet."""
     
@@ -633,7 +636,7 @@ def _read_staging_r2(city, year, month, data_type) -> Optional[pd.DataFrame]:
         raise StorageError("Failed to decode object") from e
 
 
-
+@run_with_retry(retry_exceptions=(TransientError,))
 def _list_raw_files_after_r2(city: str, after_timestamp: Optional[datetime], data_type: str) -> List[Path]:
     """List raw files in R2. Use paginator, filter by timestamp, return Path-like objects with .stem property."""
     paginator = clients.s3.get_paginator("list_objects_v2")
@@ -672,7 +675,7 @@ def _list_raw_files_after_r2(city: str, after_timestamp: Optional[datetime], dat
     return objects
 
 
-
+@run_with_retry(retry_exceptions=(TransientError,))
 def _get_high_water_mark_r2(city, year, month, data_type) -> Optional[datetime]:
     """Get HWM from R2. Use _get_hwm_key, boto3 get_object, json.loads."""
     hwm_key = _get_hwm_key(city, year, month, data_type)
@@ -699,7 +702,7 @@ def _get_high_water_mark_r2(city, year, month, data_type) -> Optional[datetime]:
         raise StorageError("Failed to decode object") from e
 
     
-
+@run_with_retry(retry_exceptions=(TransientError,))
 def _set_high_water_mark_r2(city: str, year: int, month: int, timestamp: datetime, data_type: str) -> Optional[Path]:
     """Set HWM in R2. Use _get_hwm_key, json.dumps, boto3 put_object."""
     hwm_key = _get_hwm_key(city, year, month, data_type)
@@ -723,4 +726,34 @@ def _set_high_water_mark_r2(city: str, year: int, month: int, timestamp: datetim
     else:
         return Path(hwm_key)
     
+
+@run_with_retry(retry_exceptions=(TransientError,))
+def _read_raw_json_r2(path: Path) -> Optional[dict]:
+    """Read a raw JSON file from R2 by key path.
+
+    Args:
+        path: R2 object key as a Path (e.g. raw/current/toronto/.../123.json)
+
+    Returns:
+        Parsed JSON dict, or None if the object does not exist
+    """
+    key = path.as_posix() if isinstance(path, Path) else str(path)
+    try:
+        response = clients.s3.get_object(Bucket=config.R2_BUCKET_NAME, Key=key)
+        body = _s3_body_to_bytes(response["Body"])
+        return json.loads(body)
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        if error_code in ("NoSuchKey", "404"):
+            return None
+        logger.error(f"Failed to read raw file from R2 key={key}: {error_code}: {e}")
+        if is_transient_s3_error(error_code):
+            raise TransientError(f"Transient S3 error: {error_code}") from e
+        else:
+            raise StorageError(f"Non-transient S3 error: {error_code}") from e
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
+        logger.error(f"Failed to decode raw JSON from R2 key={key}: {e}")
+        raise StorageError("Failed to decode raw JSON") from e
+
+
 

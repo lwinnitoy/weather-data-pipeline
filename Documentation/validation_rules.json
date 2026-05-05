@@ -1,0 +1,49 @@
+{
+  "current": {
+    "schema": {
+      "required_columns": [
+        "city",
+        "timestamp",
+        "temp_c",
+        "feels_like_c",
+        "humidity_pct",
+        "pressure_hpa",
+        "wind_speed_ms",
+        "wind_deg",
+        "weather_main",
+        "weather_description",
+        "clouds_pct",
+        "feels_like_delta"
+      ]
+    },
+    "row_count": { "min": 1 },
+    "null_thresholds": {
+      "temp_c": 0.01,
+      "humidity_pct": 0.05
+    },
+    "uniqueness": [["city", "timestamp"]]
+  },
+  "forecast": {
+    "schema": {
+      "required_columns": [
+        "city",
+        "fetched_at",
+        "forecast_for",
+        "temp_c",
+        "feels_like_c",
+        "humidity_pct",
+        "pressure_hpa",
+        "wind_speed_ms",
+        "wind_deg",
+        "weather_main",
+        "weather_description",
+        "clouds_pct",
+        "feels_like_delta",
+        "horizon_hours"
+      ]
+    },
+    "row_count": { "min": 1 },
+    "null_thresholds": {},
+    "uniqueness": [["city", "fetched_at", "forecast_for"]]
+  }
+}

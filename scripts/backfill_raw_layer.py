@@ -122,7 +122,7 @@ def backfill_data_type(data_type: str, city_map: dict[int, str], dry_run: bool) 
             continue
         
         # Convert timestamp to unix
-        unix_ts = int(timestamp_utc.timestamp())
+        unix_ts = timestamp_utc.timestamp()
         
         if dry_run:
             if stats["processed"] <= 5:  # Show first few

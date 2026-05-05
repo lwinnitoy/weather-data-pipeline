@@ -27,7 +27,12 @@ from storage import (
     write_staging,
     get_high_water_mark,
     set_high_water_mark,
+    _read_raw_json_r2
 )
+import config
+from validators import engine as validation_engine
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +117,19 @@ def process_partition_current(city: str, year: int, month: int) -> int:
     new_df = pd.DataFrame(records)
     old_df = read_staging(city, year, month, data_type)
     merged = merge_with_existing(old_df, new_df, data_type)
+
+    # Run validation gates scoped to this project
+    try:
+        report = validation_engine.run_validations(merged, data_type=data_type, city=city, year=year, month=month)
+        if report.failures:
+            for f in report.failures:
+                logger.warning("Validation %s: %s - %s", f.check, f.severity, f.message)
+            if config.VALIDATION_FAIL_ON_ERROR and any(f.severity == "error" for f in report.failures):
+                raise RuntimeError(f"Validation failed for {city} {year}-{month} {data_type}")
+    except Exception:
+        logger.exception("Validation runner raised an exception")
+        if config.VALIDATION_FAIL_ON_ERROR:
+            raise
     write_staging(city, year, month, merged, data_type)
 
     #update high water-mark
@@ -193,6 +211,19 @@ def process_partition_forecast(city: str, year: int, month: int) -> int:
     new_df = pd.DataFrame(records)
     old_df = read_staging(city, year, month, data_type)
     merged = merge_with_existing(old_df, new_df, data_type)
+
+    # Run validation gates scoped to this project
+    try:
+        report = validation_engine.run_validations(merged, data_type=data_type, city=city, year=year, month=month)
+        if report.failures:
+            for f in report.failures:
+                logger.warning("Validation %s: %s - %s", f.check, f.severity, f.message)
+            if config.VALIDATION_FAIL_ON_ERROR and any(f.severity == "error" for f in report.failures):
+                raise RuntimeError(f"Validation failed for {city} {year}-{month} {data_type}")
+    except Exception:
+        logger.exception("Validation runner raised an exception")
+        if config.VALIDATION_FAIL_ON_ERROR:
+            raise
     write_staging(city, year, month, merged, data_type)
 
     #update high water-mark
@@ -365,6 +396,8 @@ def read_raw_json(path: Path) -> Optional[dict]:
     Returns:
         Parsed JSON dict, or None if read fails
     """
+    if config.STORAGE_BACKEND=="r2":
+        return _read_raw_json_r2(path)
     try:
         with path.open("r") as f:
             return json.load(f)

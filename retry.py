@@ -66,33 +66,40 @@ def is_retryable_http_status(status_code: int) -> bool:
     return status_code in RETRYABLE_HTTP_STATUS
 
 
-def run_with_retry(func):
-    """Decorator factory to retry a function on RetryError with exponential backoff.
+def run_with_retry(func=None, retry_exceptions=(RetryError,)):
+    """Decorator factory to retry a function on selected exceptions with exponential backoff.
     
     Applies Tenacity with deterministic backoff settings. Logs before each retry
     and after final outcome.
     
     Args:
-        func: Callable to decorate
+        func: Callable to decorate (when used without parentheses)
+        retry_exceptions: Tuple of exception types to retry
     
     Returns:
         Decorated function with retry behavior
     """
-    @retry(
-        retry=retry_if_exception_type(RetryError),
-        wait=wait_exponential(
-            multiplier=RETRY_BASE_DELAY,
-            exp_base=RETRY_MULTIPLIER,
-            min=RETRY_BASE_DELAY,
-            max=RETRY_MAX_DELAY,
-        ),
-        stop=stop_after_attempt(RETRY_MAX_ATTEMPTS),
-        before_sleep=before_sleep_log(logger, logging.WARNING),
-        after=after_log(logger, logging.INFO),
-        reraise=True,
-    )
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-    
-    return wrapper
+    def decorator(inner_func):
+        @retry(
+            retry=retry_if_exception_type(retry_exceptions),
+            wait=wait_exponential(
+                multiplier=RETRY_BASE_DELAY,
+                exp_base=RETRY_MULTIPLIER,
+                min=RETRY_BASE_DELAY,
+                max=RETRY_MAX_DELAY,
+            ),
+            stop=stop_after_attempt(RETRY_MAX_ATTEMPTS),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            after=after_log(logger, logging.INFO),
+            reraise=True,
+        )
+        @wraps(inner_func)
+        def wrapper(*args, **kwargs):
+            return inner_func(*args, **kwargs)
+
+        return wrapper
+
+    if func is None:
+        return decorator
+
+    return decorator(func)

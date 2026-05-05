@@ -12,7 +12,20 @@ import config
 
 
 # Public client objects (may be None when not configured)
-s3 = None
+#s3 = None
+
+
+def _missing_r2_config() -> list[str]:
+    missing = []
+    if not config.R2_ACCESS_KEY:
+        missing.append("S3_ACCESS_KEY")
+    if not config.R2_SECRET_KEY:
+        missing.append("S3_SECRET_KEY")
+    if not config.R2_ENDPOINT_URL:
+        missing.append("S3_ENDPOINT_URL")
+    if not config.R2_BUCKET_NAME:
+        missing.append("S3_BUCKET_NAME")
+    return missing
 
 
 def init_clients() -> None:
@@ -24,6 +37,13 @@ def init_clients() -> None:
     global s3
 
     if config.STORAGE_BACKEND == "r2":
+        missing = _missing_r2_config()
+        if missing:
+            missing_str = ", ".join(missing)
+            raise RuntimeError(
+                f"Missing R2 config: {missing_str}. "
+                "Set these env vars (or .env) before importing config."
+            )
         s3 = boto3.client(
             "s3",
             aws_access_key_id=config.R2_ACCESS_KEY,

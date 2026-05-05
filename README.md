@@ -121,6 +121,7 @@ Future expansion:
 - Weather alerts ingestion (deferred until a suitable free API is available)
 - Airflow/Prefect orchestration
 - BI/dashboard layer
+ - Persist per-run validation reports and aggregate validation metrics (store JSON reports to `data_lake/validation_reports/`, emit summary metrics for Grafana/Prometheus). This enables historical QA, trend detection, and alerting.
 
 
 

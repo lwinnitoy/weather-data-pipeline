@@ -39,12 +39,14 @@ def run_pipeline(data_types):
             logger.info("Starting load...")
             _run_load(data_type)
             logger.info("Loading complete!")
+            logger.info("Pipeline complete")
         except (RuntimeError, ValueError, StorageError, OSError) as e:
             logger.error(f"Pipeline failed for {data_type}: {e}")
         except Exception:
             logger.exception(f"Unexpected pipeline failure for {data_type}")
     
-    logger.info("Pipeline complete")
+    logger.info("Pipeline terminated")
+    
 
 
 def _run_extract(data_type: str):

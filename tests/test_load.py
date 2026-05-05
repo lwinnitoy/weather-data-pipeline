@@ -172,8 +172,8 @@ class TestValidateTimestampGap:
 class TestExtractStaging:
     """Tests for _extract_staging."""
     
-    @patch('load.storage.read_staging')
-    @patch('load.storage.list_raw_files_after')
+    @patch('load.read_staging')
+    @patch('load.list_raw_files_after')
     @patch('load._validate_timestamp_gap')
     @patch('load._get_last_loaded_timestamp')
     @patch('load.utils._get_city_mapping')
@@ -185,8 +185,8 @@ class TestExtractStaging:
         
         assert result == []
     
-    @patch('load.storage.read_staging')
-    @patch('load.storage.list_raw_files_after')
+    @patch('load.read_staging')
+    @patch('load.list_raw_files_after')
     @patch('load._validate_timestamp_gap')
     @patch('load._get_last_loaded_timestamp')
     @patch('load.utils._get_city_mapping')

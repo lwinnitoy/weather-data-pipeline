@@ -33,7 +33,11 @@ STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local")  # "local" or "s3"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Cloudflare s3 configuration
-R2_ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
-R2_SECRET_KEY = os.getenv("S3_SECRET_KEY")
-R2_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL")
-R2_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY_ID")
+R2_SECRET_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+R2_ENDPOINT_URL = os.getenv("R2_ENDPOINT_URL")
+R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
+ 
+# Validation gate behavior: when True, validations with failures will raise and stop the transform.
+# Defaults to false to avoid breaking existing runs; set to 'true' in env to enable strict gating.
+VALIDATION_FAIL_ON_ERROR = os.getenv("VALIDATION_FAIL_ON_ERROR", "false").lower() in ("1", "true", "yes")
