@@ -1,21 +1,64 @@
 """
 Orchestrator for weather data pipeline
 """
+from datetime import datetime, timezone
+import logging
+import uuid
+
+import config
 from extract import extract_openweathermap
 import staging_transform
 import load
-import logging
 import utils
 from storage import StorageError
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 
+class _RunIdFilter(logging.Filter):
+    """Inject a run_id into log records for per-run tracing."""
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__()
+        self._run_id = run_id
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "run_id"):
+            record.run_id = self._run_id
+        return True
+
+
+def _get_log_level() -> int:
+    level_name = str(config.LOG_LEVEL).upper()
+    return getattr(logging, level_name, logging.INFO)
+
+
+def _configure_logging(run_id: str) -> None:
+    level = _get_log_level()
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - run_id=%(run_id)s - %(message)s"
+    logging.basicConfig(level=level, format=log_format)
+    root = logging.getLogger()
+    root.setLevel(level)
+    formatter = logging.Formatter(log_format)
+    run_id_filter = _RunIdFilter(run_id)
+    for handler in root.handlers:
+        handler.setFormatter(formatter)
+        handler.setLevel(level)
+        for existing in list(handler.filters):
+            if isinstance(existing, _RunIdFilter):
+                handler.removeFilter(existing)
+        handler.addFilter(run_id_filter)
+
+
+def _new_run_id() -> str:
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    suffix = uuid.uuid4().hex[:8]
+    return f"{ts}-{suffix}"
+
+
 def run_pipeline(data_types):
+    run_id = _new_run_id()
+    _configure_logging(run_id)
     logger.info(f"Starting pipeline for {data_types}")
     
     for data_type in data_types:
@@ -44,15 +87,18 @@ def run_pipeline(data_types):
             logger.error(f"Pipeline failed for {data_type}: {e}")
         except Exception:
             logger.exception(f"Unexpected pipeline failure for {data_type}")
+
+        
     
     logger.info("Pipeline terminated")
+    return run_id
+    
     
 
 
 def _run_extract(data_type: str):
     logger.info(f"Extracting {data_type} weather data")
-    endpoint = "weather" if data_type == "current" else "forecast"
-    raw = extract_openweathermap(endpoint)
+    raw = extract_openweathermap(data_type)
     return False if raw == {} else True
 
 

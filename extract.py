@@ -7,12 +7,10 @@ from typing import Dict, List, Tuple
 import logging
 import config
 import utils
-from storage import write_raw, TransientError as StorageTransientError
+from storage import write_raw, TransientError as StorageTransientError, StorageError
 import datetime as datetime
 from retry import RetryError, run_with_retry, is_retryable_http_status
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -61,7 +59,7 @@ def _get_response(lat, lon, endpoint):
         raise RetryError(f"Connection error: {e}") from e
 
 
-def extract_openweathermap(endpoint: str) -> Dict[int, dict]:
+def extract_openweathermap(data_type: str) -> Dict[int, dict]:
     """
     Extract current weather data or forecast or alerts from OpenWeatherMap API for all configured cities.
     
@@ -73,9 +71,11 @@ def extract_openweathermap(endpoint: str) -> Dict[int, dict]:
     city_map = utils._get_city_mapping()
     city_data = {}
 
-    if endpoint not in ["weather", "forecast"]: 
-        endpoint = "weather"
-
+    if data_type not in ["current", "forecast"]:
+        raise ValueError(f"Invalid data_type: {data_type}. Must be 'current' or 'forecast'.")
+    
+    endpoint = "weather" if data_type == "current" else "forecast"
+    
     for city_name, lat, lon in cities:
         try:
             response = _get_response(lat, lon, endpoint)
@@ -90,14 +90,20 @@ def extract_openweathermap(endpoint: str) -> Dict[int, dict]:
 
                 # Write raw data to data lake with retry on transient storage errors
                 try:
-                    if endpoint == "weather":
-                        data_type = "current"
-                    else:
-                        data_type = "forecast"
-                    write_raw(city_name, datetime.datetime.now(), response.json(), data_type)
-                    logger.info(f"Successfully wrote response for {city_name} to raw layer")
+                    raw_key = write_raw(city_name, datetime.datetime.now(), response.json(), data_type)
+                    if raw_key is None:
+                        logger.error(f"Failed to write raw data for {city_name}")
+                        continue
+                    logger.info(
+                        f"Successfully wrote response for {city_name} to raw layer: {raw_key}"
+                    )
                 except StorageTransientError as e:
+                    #retry logic for local transient storage errors (e.g. file system issues)
+                    #retry logic for r2 is handled within storage module, so we just log and skip on failure here
                     logger.error(f"Transient storage error writing {city_name}: {e}. Skipping.")
+                    continue
+                except StorageError as e:
+                    logger.error(f"Storage error writing {city_name}: {e}. Skipping.")
                     continue
             else:
                 logger.warning(f"City {city_name} not found in mapping")

@@ -755,5 +755,29 @@ def _read_raw_json_r2(path: Path) -> Optional[dict]:
         logger.error(f"Failed to decode raw JSON from R2 key={key}: {e}")
         raise StorageError("Failed to decode raw JSON") from e
 
+def _write_run_summary_r2(summary: dict, data_type: str) -> Optional[str]:
+    """Write a pipeline run summary to R2 for observability.
 
+    Args:
+        summary: Dictionary containing run metadata (e.g. start_time, end_time, status)
+        data_type: type of weather data i.e forecast/current
+
+    Returns:
+        Key where summary was written
+    """
+    timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    key = f"runs/{data_type}/run_summary_{timestamp}.json"
+    try:
+        clients.s3.put_object(Bucket=config.R2_BUCKET_NAME, Key=key, Body=json.dumps(summary))
+        logger.info(f"Wrote run summary to R2: {key}")
+    except ClientError as e:
+        error_code = e.response.get("Error", {}).get("Code", "Unknown")
+        logger.error(f"Failed to upload run summary to R2 key={key}: {error_code}: {e}")
+        if is_transient_s3_error(error_code):
+            raise TransientError(f"Transient S3 error: {error_code}") from e
+        else:
+            raise StorageError(f"Non-transient S3 error: {error_code}") from e
+    except (TypeError, ValueError) as e:
+        logger.error(f"Failed to upload summary file to R2: error: {e}")
+        raise StorageError("Failed to serialize run summary") from e
 

@@ -24,4 +24,9 @@ jobs:
           DB_PORT: ${{ secrets.PORT }}
           DB_NAME: ${{ secrets.DBNAME }}
           API_KEY: ${{ secrets.API_KEY }}
+          STORAGE_BACKEND: ${{ secrets.STORAGE_BACKEND }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
         run: python orchestrator.py --data-types forecast
