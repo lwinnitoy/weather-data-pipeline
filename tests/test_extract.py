@@ -147,7 +147,7 @@ class TestExtractOpenweathermap:
         mock_response.json.return_value = mock_api_response
         mock_get.return_value = mock_response
         
-        result = extract_openweathermap("weather")
+        result = extract_openweathermap("current")
         
         assert len(result) == 3
         assert 1 in result  # Toronto
@@ -174,7 +174,7 @@ class TestExtractOpenweathermap:
         
         mock_get.side_effect = [success_response, error_response, success_response]
         
-        result = extract_openweathermap("weather")
+        result = extract_openweathermap("current")
         
         # 2 cities succeeded (1 failed with 404 error)
         assert len(result) == 2
@@ -199,7 +199,7 @@ class TestExtractOpenweathermap:
             success_response,
         ]
         
-        result = extract_openweathermap("weather")
+        result = extract_openweathermap("current")
         
         # 2 cities succeeded (1 timed out)
         assert len(result) == 2
@@ -228,7 +228,7 @@ class TestExtractOpenweathermap:
 
         mock_get.side_effect = [retry_response, retry_response, success_response]
 
-        result = extract_openweathermap("weather")
+        result = extract_openweathermap("current")
 
         assert mock_get.call_count == 3
         assert result == {1: mock_api_response}
@@ -253,7 +253,7 @@ class TestExtractOpenweathermap:
 
         mock_get.return_value = retry_response
 
-        result = extract_openweathermap("weather")
+        result = extract_openweathermap("current")
 
         assert mock_get.call_count == RETRY_MAX_ATTEMPTS
         assert result == {}
@@ -261,9 +261,9 @@ class TestExtractOpenweathermap:
     @patch('utils._get_city_mapping')
     @patch('extract._get_cities_to_fetch')
     @patch('extract.requests.get')
-    def test_defaults_to_weather_endpoint(self, mock_get, mock_cities_fetch, mock_mapping,
+    def test_invalid_data_type_raises(self, mock_get, mock_cities_fetch, mock_mapping,
                                           mock_cities, mock_city_mapping, mock_api_response):
-        """Test that invalid endpoint defaults to 'weather'."""
+        """Test that invalid data types raise ValueError."""
         mock_cities_fetch.return_value = [mock_cities[0]]  # Just one city
         mock_mapping.return_value = mock_city_mapping
         
@@ -272,11 +272,10 @@ class TestExtractOpenweathermap:
         mock_response.json.return_value = mock_api_response
         mock_get.return_value = mock_response
         
-        extract_openweathermap("invalid_endpoint")
-        
-        # Check that 'weather' was used in URL
-        call_url = mock_get.call_args[0][0]
-        assert "/weather?" in call_url
+        with pytest.raises(ValueError):
+            extract_openweathermap("invalid_endpoint")
+
+        mock_get.assert_not_called()
     
     @patch('utils._get_city_mapping')
     @patch('extract._get_cities_to_fetch')
@@ -304,6 +303,6 @@ class TestExtractOpenweathermap:
         mock_cities_fetch.return_value = []
         mock_mapping.return_value = {}
         
-        result = extract_openweathermap("weather")
+        result = extract_openweathermap("current")
         
         assert result == {}

@@ -1,8 +1,10 @@
 """
 Orchestrator for weather data pipeline
 """
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
+from typing import Optional, Tuple
 import uuid
 
 import config
@@ -26,6 +28,22 @@ class _RunIdFilter(logging.Filter):
         if not hasattr(record, "run_id"):
             record.run_id = self._run_id
         return True
+
+
+@dataclass
+class RunMetrics:
+    run_id: str
+    data_type: str
+    start_ts: datetime
+    end_ts: Optional[datetime] = None
+    duration_s: Optional[float] = None
+    cities_total: int = 0
+    cities_succeeded: int = 0
+    cities_failed: int = 0
+    records_staged: int = 0
+    rows_loaded: int = 0
+    errors_count: int = 0
+    status: str = "success"
 
 
 def _get_log_level() -> int:
@@ -56,50 +74,94 @@ def _new_run_id() -> str:
     return f"{ts}-{suffix}"
 
 
+def _init_run_metrics(run_id: str, data_type: str) -> RunMetrics:
+    return RunMetrics(run_id=run_id, data_type=data_type, start_ts=datetime.now(timezone.utc))
+
+
+def _finalize_run_metrics(metrics: RunMetrics) -> None:
+    metrics.end_ts = datetime.now(timezone.utc)
+    metrics.duration_s = (metrics.end_ts - metrics.start_ts).total_seconds()
+
+
+def _log_run_summary(metrics: RunMetrics) -> None:
+    logger.info(
+        "RUN_SUMMARY run_id=%s data_type=%s status=%s duration_s=%.2f cities_total=%d cities_succeeded=%d cities_failed=%d records_staged=%d rows_loaded=%d errors=%d start_ts=%s end_ts=%s",
+        metrics.run_id,
+        metrics.data_type,
+        metrics.status,
+        metrics.duration_s or 0.0,
+        metrics.cities_total,
+        metrics.cities_succeeded,
+        metrics.cities_failed,
+        metrics.records_staged,
+        metrics.rows_loaded,
+        metrics.errors_count,
+        metrics.start_ts.isoformat(),
+        metrics.end_ts.isoformat() if metrics.end_ts else "",
+    )
+
+
 def run_pipeline(data_types):
     run_id = _new_run_id()
     _configure_logging(run_id)
-    logger.info(f"Starting pipeline for {data_types}")
+    logger.info("Starting pipeline for %s", data_types)
     
     for data_type in data_types:
-        logger.info(f"=== Processing {data_type} ===")
+        metrics = _init_run_metrics(run_id, data_type)
+        logger.info("=== Processing %s ===", data_type)
         
         try:
             # Extract
             logger.info("Starting extract...")
-            success = _run_extract(data_type)
-            if not success:
-                logger.error(f"Extract failed for {data_type}")
+            extract_ok, cities_total, cities_succeeded, cities_failed = _run_extract(data_type)
+            metrics.cities_total = cities_total
+            metrics.cities_succeeded = cities_succeeded
+            metrics.cities_failed = cities_failed
+            if not extract_ok:
+                metrics.errors_count += 1
+                metrics.status = "failed"
+                logger.error("Extract failed for %s", data_type)
                 continue
             logger.info("Extracting complete!")
             
             # Stage
             logger.info("Starting staging...")
-            staged = _run_staging(data_type)
-            logger.info(f"Staged {staged} records")
+            metrics.records_staged = _run_staging(data_type)
+            logger.info("Staged %s records", metrics.records_staged)
             
             #Load
             logger.info("Starting load...")
-            _run_load(data_type)
+            metrics.rows_loaded = _run_load(data_type)
             logger.info("Loading complete!")
             logger.info("Pipeline complete")
         except (RuntimeError, ValueError, StorageError, OSError) as e:
-            logger.error(f"Pipeline failed for {data_type}: {e}")
+            metrics.errors_count += 1
+            metrics.status = "partial" if (metrics.records_staged or metrics.rows_loaded) else "failed"
+            logger.error("Pipeline failed for %s: %s", data_type, e)
         except Exception:
-            logger.exception(f"Unexpected pipeline failure for {data_type}")
+            metrics.errors_count += 1
+            metrics.status = "partial" if (metrics.records_staged or metrics.rows_loaded) else "failed"
+            logger.exception("Unexpected pipeline failure for %s", data_type)
+        finally:
+            if metrics.status == "success" and metrics.cities_failed:
+                metrics.status = "partial"
+            _finalize_run_metrics(metrics)
+            _log_run_summary(metrics)
 
-        
-    
     logger.info("Pipeline terminated")
     return run_id
     
     
 
 
-def _run_extract(data_type: str):
-    logger.info(f"Extracting {data_type} weather data")
+def _run_extract(data_type: str) -> Tuple[bool, int, int, int]:
+    logger.info("Extracting %s weather data", data_type)
+    cities_total = len(utils._get_city_mapping())
     raw = extract_openweathermap(data_type)
-    return False if raw == {} else True
+    cities_succeeded = len(raw)
+    cities_failed = max(cities_total - cities_succeeded, 0)
+    success = raw != {}
+    return success, cities_total, cities_succeeded, cities_failed
 
 
 def _run_staging(data_type: str):
@@ -113,12 +175,10 @@ def _run_staging(data_type: str):
     return total
 
 
-def _run_load(data_type: str):
+def _run_load(data_type: str) -> int:
     if data_type == "current":
-        load.load_weather()
-    else:
-        load.load_forecast()
-    return
+        return load.load_weather()
+    return load.load_forecast()
 
 
 if __name__ == "__main__":

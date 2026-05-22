@@ -13,7 +13,7 @@ from storage import list_raw_files_after, read_staging
 logger = logging.getLogger(__name__)
 
 
-def load_weather() -> None:
+def load_weather() -> int:
     """
     Load current weather records from Staging layer into PostgreSQL.
     
@@ -33,7 +33,7 @@ def load_weather() -> None:
 
     if not records:
         logger.info("No records to load")
-        return
+        return 0
 
     
     insert_sql = """
@@ -55,7 +55,8 @@ def load_weather() -> None:
             with conn.cursor() as cursor:
                 cursor.executemany(insert_sql, records)
         
-        logger.info(f"Successfully loaded {len(records)} records")
+        logger.info("Successfully loaded %s records", len(records))
+        return len(records)
         
     except psycopg2.Error as e:
         logger.error(f"Failed to load data: {e}")
@@ -64,7 +65,7 @@ def load_weather() -> None:
             logger.error(f"detail: {e.diag.message_primary}")
         raise psycopg2.DatabaseError("Failed to load current weather records") from e
 
-def load_forecast() -> None:
+def load_forecast() -> int:
     """
     Load forecast records from Staging layer into PostgreSQL.
     
@@ -86,7 +87,7 @@ def load_forecast() -> None:
 
     if not records:
         logger.info("No records to load")
-        return
+        return 0
 
     insert_sql = """
         INSERT INTO weather_forecast (
@@ -107,7 +108,8 @@ def load_forecast() -> None:
             with conn.cursor() as cursor:
                 cursor.executemany(insert_sql, records)
         
-        logger.info(f"Successfully loaded {len(records)} records")
+        logger.info("Successfully loaded %s records", len(records))
+        return len(records)
     except psycopg2.Error as e:
         logger.error(f"Failed to load data: {e}")
         logger.error(f"pgcode: {e.pgcode}")
