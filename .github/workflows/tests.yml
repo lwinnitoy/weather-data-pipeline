@@ -6,9 +6,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 3 * * *"
 
 jobs:
-  test:
+  unit-tests:
     runs-on: ubuntu-latest
     
     steps:
@@ -22,6 +24,70 @@ jobs:
       
       - name: Install dependencies
         run: pip install -r requirements.txt
-      
+
       - name: Run tests
         run: pytest tests/ -v --tb=short
+
+  integration-tests:
+    if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: weather_user
+          POSTGRES_PASSWORD: weather_pass
+          POSTGRES_DB: weather_pipeline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U weather_user -d weather_pipeline"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DB_USER: weather_user
+      DB_PASSWORD: weather_pass
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: weather_pipeline
+      PGSSLMODE: disable
+      PGPASSWORD: weather_pass
+      STORAGE_BACKEND: local
+      RUN_INTEGRATION_TESTS: 1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Postgres client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres
+        run: |
+          for i in {1..30}; do
+            if pg_isready -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME"; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Postgres did not become ready in time"
+          exit 1
+
+      - name: Run migrations
+        run: |
+          for f in migrations/*.sql; do
+            echo "Running $f"
+            psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f "$f"
+          done
+
+      - name: Run integration tests
+        run: pytest tests/test_integration_current.py tests/test_integration_forecast.py -v --tb=short
