@@ -1,0 +1,34 @@
+name: Monitor Pipeline
+
+on:
+  schedule:
+    - cron: "15 * * * *"  # 15 min after every hour, giving pipelines time to finish
+  workflow_dispatch:       # manual trigger
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Run monitor
+        env:
+          DB_USER: ${{ secrets.USER }}
+          DB_PASSWORD: ${{ secrets.PASSWORD }}
+          DB_HOST: ${{ secrets.HOST }}
+          DB_PORT: ${{ secrets.PORT }}
+          DB_NAME: ${{ secrets.DBNAME }}
+          STORAGE_BACKEND: ${{ secrets.STORAGE_BACKEND }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+        run: python monitor.py --data-types current forecast

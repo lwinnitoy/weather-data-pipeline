@@ -8,13 +8,19 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database configuration
+_DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "30"))        # seconds to establish TCP connection
+_DB_STATEMENT_TIMEOUT_MS = int(os.getenv("DB_STATEMENT_TIMEOUT_MS", "300000"))  # ms per query (5 min)
+_DB_LOCK_TIMEOUT_MS = int(os.getenv("DB_LOCK_TIMEOUT_MS", "30000"))     # ms waiting on locks (30 s)
+
 DATABASE = {
     'user': os.getenv("DB_USER"),
     'password': os.getenv("DB_PASSWORD"),
     'host': os.getenv("DB_HOST"),
     'port': os.getenv("DB_PORT"),
     'dbname': os.getenv("DB_NAME"),
-    'sslmode': os.getenv("PGSSLMODE", "require")
+    'sslmode': os.getenv("PGSSLMODE", "require"),
+    'connect_timeout': _DB_CONNECT_TIMEOUT,
+    'options': f"-c statement_timeout={_DB_STATEMENT_TIMEOUT_MS} -c lock_timeout={_DB_LOCK_TIMEOUT_MS}",
 }
 
 # OpenWeatherMap API configuration
