@@ -1,0 +1,47 @@
+name: Publish Dashboard
+
+on:
+  schedule:
+    - cron: "0 7 * * *"  # 7 AM UTC daily, after overnight pipeline runs
+  workflow_dispatch:      # manual trigger
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Generate dashboard
+        env:
+          DB_USER: ${{ secrets.USER }}
+          DB_PASSWORD: ${{ secrets.PASSWORD }}
+          DB_HOST: ${{ secrets.HOST }}
+          DB_PORT: ${{ secrets.PORT }}
+          DB_NAME: ${{ secrets.DBNAME }}
+          STORAGE_BACKEND: ${{ secrets.STORAGE_BACKEND }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+        run: |
+          mkdir -p deploy
+          python dashboard.py --output deploy/index.html
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Deploy to Cloudflare Pages
+        run: npx wrangler@3 pages deploy deploy --project-name=${{ secrets.CF_PAGES_PROJECT_NAME }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
