@@ -1,5 +1,5 @@
 # Sprint Checklist (Mini Board)
-Last updated: 2026-05-05
+Last updated: 2026-05-31
 
 Priority labels: P0 = critical, P1 = high, P2 = nice-to-have.
 Status values: Not Started, In Progress, Partial, Done, Blocked.
@@ -15,9 +15,9 @@ Status values: Not Started, In Progress, Partial, Done, Blocked.
 ## Week 2 Goal: Observability + Integration Confidence
 | Task | Priority | Estimate | Status | Deliverable | Acceptance Criteria | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Task 5: Add integration test path with real Postgres (container or dedicated test DB) | P1 | 2 days | Not Started | at least one end-to-end test for current and one for forecast | test verifies raw -> staging -> load with idempotent re-run behavior | All tests currently mock Postgres (see conftest.py). Need: Docker Postgres container setup in CI or test fixture, e2e test for current+forecast ETL flow, idempotency verification (re-run same raw data, no duplicates). Recommend: pytest-postgresql plugin or Docker container in conftest. |
+| Task 5: Add integration test path with real Postgres (container or dedicated test DB) | P1 | 2 days | Done ✅ | at least one end-to-end test for current and one for forecast | test verifies raw -> staging -> load with idempotent re-run behavior | Added Docker Postgres for local dev and CI. Integration tests: test_integration_current.py + test_integration_forecast.py. CI runs integration tests on main and nightly. |
 | Task 6: Add lightweight freshness/anomaly checks | P1 | 1 day | Not Started | script/checks for stale city data and abnormal row-count deltas | checks can run in CI/manual mode and return actionable output | Need: Query analytics tables for (1) last_updated timestamp per city vs. current time (alert if >2h stale), (2) row count per city vs. historical baseline (alert if 0 or >10x baseline). Can be CLI tool or query set for dashboards. |
-| Task 7: Small dashboard starter for portfolio demonstration | P2 | 1 day | Not Started | minimal metrics view (ingestion counts, freshness, failure counts) | one reproducible screenshot/report query set for portfolio README | Need: 3-5 SQL queries or Python script that produces CSV/table: (1) rows/city/day, (2) last refresh timestamp/city, (3) error counts by type/week. Matplotlib or plain SQL output acceptable. |
+| Task 7: Small dashboard starter for portfolio demonstration | P2 | 1 day | In Progress | minimal metrics view (ingestion counts, freshness, failure counts) | static HTML export for GitHub Pages/Cloudflare Pages | Need: 3-5 SQL queries or Python script that produces CSV/table: (1) rows/city/day, (2) last refresh timestamp/city, (3) error counts by type/week. Matplotlib or plain SQL output acceptable. |
 | Task 8: Docs and architecture decision log polish | P2 | 1 day | Partial | update docs with final behavior and trade-offs | docs match implementation, no stale command paths, clear scope boundaries | SRS.txt and SYSTEM ARCHITECTURE.txt updated 2026-03-27. Validation rules documented. Retry logic documented. Missing: end-of-sprint polish (final checklist of completed features, roadmap for next phases). |
 
 ## End-of-Week-2 Milestone (Portfolio Checkpoint)
@@ -29,6 +29,7 @@ Status values: Not Started, In Progress, Partial, Done, Blocked.
 - Idempotent loads (ON CONFLICT DO NOTHING + DB constraints)
 - GitHub Actions schedules for current (1h) and forecast (3h)
 - Unit tests for extract, transform, load, storage (80+ tests)
+- Integration tests with real Postgres (current + forecast, idempotency)
 - Lakehouse architecture (raw → staging → analytics)
 - Local + R2 storage backends
 
@@ -36,7 +37,6 @@ Status values: Not Started, In Progress, Partial, Done, Blocked.
 - Task 3 (Metrics): Log per-run summary with row counts
 
 ❌ **Not Started (Week 2 blockers)**:
-- Task 5 (Integration Tests): Real Postgres e2e tests
 - Task 6 (Freshness/Anomaly): Stale data and outlier detection
 - Task 7 (Dashboard): Portfolio-ready metrics view
 

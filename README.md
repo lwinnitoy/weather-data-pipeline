@@ -31,6 +31,7 @@ Key implementation decisions:
 - PostgreSQL load layer with duplicate protection
 - Local and R2 object-storage support
 - Automated CI test workflow and scheduled pipeline workflows
+- Integration tests with real PostgreSQL (gated in CI)
 
 ## Tech Stack
 
@@ -47,6 +48,7 @@ Key implementation decisions:
 - `extract.py`: API extraction + raw writes
 - `staging_transform.py`: raw-to-staging transforms + high-water marks
 - `load.py`: staging-to-warehouse load
+- `dashboard.py`: static HTML dashboard generator for portfolio hosting
 - `storage.py`: local/R2 storage repository layer
 - `orchestrator.py`: CLI orchestration entry point
 - `migrations/`: SQL schema and idempotency migrations
@@ -83,6 +85,14 @@ S3_ENDPOINT_URL=...
 S3_BUCKET_NAME=...
 ```
 
+Optional local Postgres (Docker):
+
+```bash
+docker compose up -d
+```
+
+When using the local container, set `DB_*` to match docker-compose and use `PGSSLMODE=disable`.
+
 ## Running the Pipeline
 
 Run both supported data types:
@@ -104,18 +114,24 @@ Run tests:
 python -m pytest -q
 ```
 
+Run integration tests (requires Docker Postgres):
+
+```bash
+RUN_INTEGRATION_TESTS=1 pytest tests/test_integration_current.py tests/test_integration_forecast.py -v
+```
+
 ## Automation
 
 - Hourly current-weather pipeline: `.github/workflows/current_pipeline.yml`
 - Forecast pipeline every 3 hours: `.github/workflows/forecast_pipeline.yml`
-- Test CI on push/PR: `.github/workflows/tests.yml`
+- Test CI on push/PR; integration tests run on main and nightly: `.github/workflows/tests.yml`
 
 ## Roadmap
 
 Near-term:
-- Add retry/backoff around API and transient storage failures
-- Add stricter data validation checks in transform layer
 - Add richer run-level metrics and observability
+- Add lightweight freshness/anomaly checks
+- Publish the static dashboard to GitHub Pages or Cloudflare Pages
 
 Future expansion:
 - Weather alerts ingestion (deferred until a suitable free API is available)
