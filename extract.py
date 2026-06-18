@@ -5,6 +5,7 @@ import requests
 import psycopg2
 from typing import Dict, List, Tuple
 import logging
+import time
 import config
 import utils
 from storage import write_raw, TransientError as StorageTransientError, StorageError
@@ -76,14 +77,24 @@ def extract_openweathermap(data_type: str) -> Dict[int, dict]:
     
     endpoint = "weather" if data_type == "current" else "forecast"
     
+    api_latencies: List[Tuple[str, float]] = []  # (city_name, latency_ms)
+    total_payload_bytes = 0
+
     for city_name, lat, lon in cities:
         try:
+            t0 = time.perf_counter()
             response = _get_response(lat, lon, endpoint)
-            
+            latency_ms = (time.perf_counter() - t0) * 1000
+            payload_bytes = len(response.content)
+
             if response.status_code != 200:
-                logger.warning(f"API error for {city_name}: {response.status_code}")
+                logger.warning(f"API error for {city_name}: {response.status_code} ({latency_ms:.0f} ms)")
                 continue  # Skip this city, continue with others
-            
+
+            api_latencies.append((city_name, latency_ms))
+            total_payload_bytes += payload_bytes
+            logger.info(f"API {city_name}: {latency_ms:.0f} ms, {payload_bytes} bytes")
+
             city_id = city_map.get(city_name)
             if city_id:
                 city_data[city_id] = response.json()
@@ -107,7 +118,7 @@ def extract_openweathermap(data_type: str) -> Dict[int, dict]:
                     continue
             else:
                 logger.warning(f"City {city_name} not found in mapping")
-                
+
         except RetryError as e:
             logger.error(f"Failed to fetch {city_name} after retries: {e}")
             continue  # Skip this city, continue with others
@@ -117,6 +128,15 @@ def extract_openweathermap(data_type: str) -> Dict[int, dict]:
         except Exception as e:
             logger.error(f"Unexpected error fetching {city_name}: {e}", exc_info=True)
             continue
+
+    if api_latencies:
+        avg_ms = sum(ms for _, ms in api_latencies) / len(api_latencies)
+        slowest_city, slowest_ms = max(api_latencies, key=lambda x: x[1])
+        logger.info(
+            f"API_LATENCY_SUMMARY data_type={data_type} cities_ok={len(city_data)} cities_attempted={len(cities)} "
+            f"avg_ms={avg_ms:.0f} slowest_city={slowest_city} slowest_ms={slowest_ms:.0f} "
+            f"total_payload_kb={total_payload_bytes // 1024}"
+        )
 
     logger.info(f"Successfully fetched weather for {len(city_data)} cities")
     return city_data
