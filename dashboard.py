@@ -261,8 +261,9 @@ def _aggregate_daily_totals(
 def _format_timestamp(value: Optional[datetime]) -> str:
     if value is None:
         return "No data"
-    # %Z renders the Pacific abbreviation (PST / PDT) for the given date.
-    return _to_pacific(value).strftime("%Y-%m-%d %H:%M %Z")
+    pac = _to_pacific(value)
+    offset_hours = int(pac.utcoffset().total_seconds() / 3600)
+    return pac.strftime(f"%Y-%m-%d %H:%M %Z (UTC{offset_hours:+d})")
 
 
 def _format_age(value: Optional[datetime], now: datetime) -> str:
@@ -471,8 +472,8 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
     )
 
     volume_series: List[Series] = [
-        ("Current", COLOR_CURRENT, [(t.day, float(t.current_rows)) for t in snapshot.daily_totals]),
-        ("Forecast", COLOR_FORECAST, [(t.day, float(t.forecast_rows)) for t in snapshot.daily_totals]),
+        ("Current", COLOR_CURRENT, [(t.day, float(t.current_rows)) for t in snapshot.daily_totals if t.current_rows > 0]),
+        ("Forecast", COLOR_FORECAST, [(t.day, float(t.forecast_rows)) for t in snapshot.daily_totals if t.forecast_rows > 0]),
     ]
     temp_series: List[Series] = [
         ("Avg temperature", COLOR_TEMP, [(p.day, p.avg_temp_c) for p in snapshot.temp_trend]),
@@ -557,6 +558,7 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
                     background: var(--panel);
                     border-radius: 22px;
                     box-shadow: var(--shadow);
+                    min-width: 0;
                 }}
                 .stat-card {{ padding: 18px 18px 16px; min-height: 122px; }}
                 .card-label {{ color: var(--muted); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.12em; }}
@@ -582,8 +584,9 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
                 .bar-track {{ height: 12px; background: rgba(151, 170, 196, 0.12); border-radius: 999px; overflow: hidden; }}
                 .bar-fill {{ height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }}
 
-                .table-wrap {{ overflow-x: auto; }}
+                .table-wrap {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
                 table {{ width: 100%; border-collapse: collapse; min-width: 760px; }}
+                .content-secondary table {{ min-width: 320px; }}
                 th, td {{ padding: 12px 10px; text-align: left; border-bottom: 1px solid rgba(151, 170, 196, 0.14); }}
                 th {{ color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; }}
                 td {{ font-size: 0.95rem; }}
