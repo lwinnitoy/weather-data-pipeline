@@ -27,17 +27,17 @@ import utils
 
 logger = logging.getLogger(__name__)
 
-FRESHNESS_THRESHOLD_MINUTES = 120  # alert if last record is older than 2 hours
+FRESHNESS_THRESHOLD_MINUTES = 90   # alert if last record is older than 90 min (pipeline runs hourly at :17)
 
 # How many hours to treat as the "current" window for anomaly detection.
-# Sized to 3x pipeline frequency so minor delays don't false-alarm.
+# Sized to 3x pipeline frequency so a single delayed run doesn't false-alarm.
 _WINDOW_HOURS = {
     "current": 3,   # pipeline runs hourly; 3 h = ~3 expected rows per city
     "forecast": 9,  # pipeline runs every 3 h; 9 h = ~3 expected batches
 }
 
-BASELINE_DAYS = 7          # rolling window used to compute expected row counts
-ANOMALY_MAX_RATIO = 10.0   # alert if current window > 10x rolling baseline
+BASELINE_DAYS = 7         # rolling window used to compute expected row counts
+ANOMALY_MAX_RATIO = 5.0   # alert if current window > 5x rolling baseline
 
 
 # ---------------------------------------------------------------------------

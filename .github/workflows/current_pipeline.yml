@@ -2,7 +2,7 @@ name: Run Current Pipeline
 
 on:
   schedule:
-    - cron: "0 * * * *"   # every hour
+    - cron: "17 * * * *"  # every hour at :17 — avoids top-of-hour GHA scheduler congestion
   workflow_dispatch:       # manual run
 
 jobs:

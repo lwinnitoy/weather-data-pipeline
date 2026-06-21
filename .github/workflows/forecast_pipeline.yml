@@ -2,7 +2,7 @@ name: Run Forecast Pipeline
 
 on:
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: "17 */3 * * *"  # every 3 hours at :17 — avoids top-of-hour GHA scheduler congestion
   workflow_dispatch:       # manual run
 
 jobs:
