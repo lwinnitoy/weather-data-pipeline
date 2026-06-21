@@ -425,6 +425,7 @@ def _svg_line_chart(
     height: int = 300,
     start_at_zero: bool = False,
     value_suffix: str = "",
+    fill_area: bool = True,
 ) -> str:
     """Render a multi-series line chart as inline SVG."""
     non_empty = [s for s in series if s[2]]
@@ -482,10 +483,11 @@ def _svg_line_chart(
             + f" L {coords[-1][0]:.1f},{baseline_y:.1f} Z"
         )
         dots = "".join(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="{color}" />' for x, y in coords)
+        area_svg = f'<path d="{area}" fill="{color}" opacity="0.12" />' if fill_area else ""
         series_svg.append(
-            f'<path d="{area}" fill="{color}" opacity="0.12" />'
-            f'<polyline points="{line_pts}" fill="none" stroke="{color}" stroke-width="2" '
-            f'stroke-linejoin="round" stroke-linecap="round" />{dots}'
+            area_svg
+            + f'<polyline points="{line_pts}" fill="none" stroke="{color}" stroke-width="2" '
+            + f'stroke-linejoin="round" stroke-linecap="round" />{dots}'
         )
 
     return (
@@ -691,14 +693,16 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
 
     ribbon_series = _build_city_ribbon_series(snapshot.city_temp_series)
     ribbon_legend = _chart_legend(ribbon_series)
-    ribbon_chart  = _svg_line_chart(ribbon_series, height=320, value_suffix="°")
+    ribbon_chart  = _svg_line_chart(ribbon_series, height=320, value_suffix="°", fill_area=False)
 
-    volume_series: List[Series] = [
-        ("Current",  COLOR_CURRENT,  [(t.day, float(t.current_rows))  for t in snapshot.daily_totals if t.current_rows  > 0]),
+    current_volume_series: List[Series] = [
+        ("Current", COLOR_CURRENT, [(t.day, float(t.current_rows)) for t in snapshot.daily_totals if t.current_rows > 0]),
+    ]
+    forecast_volume_series: List[Series] = [
         ("Forecast", COLOR_FORECAST, [(t.day, float(t.forecast_rows)) for t in snapshot.daily_totals if t.forecast_rows > 0]),
     ]
-    volume_legend = _chart_legend(volume_series)
-    volume_chart  = _svg_line_chart(volume_series, start_at_zero=True)
+    current_volume_chart  = _svg_line_chart(current_volume_series,  start_at_zero=True)
+    forecast_volume_chart = _svg_line_chart(forecast_volume_series, start_at_zero=True)
 
     band_chart     = _svg_band_chart(snapshot.temp_band)
     accuracy_bars  = _render_forecast_accuracy_bars(snapshot.forecast_accuracy)
@@ -770,7 +774,8 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
 
                 .grid    {{ display: grid; gap: 16px; }}
                 .stats   {{ grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-top: 18px; }}
-                .two-col {{ margin-top: 20px; grid-template-columns: 1fr 1fr; }}
+                .two-col   {{ margin-top: 20px; grid-template-columns: 1fr 1fr; }}
+                .three-col {{ margin-top: 20px; grid-template-columns: 1fr 1fr 1fr; }}
                 .one-col {{ margin-top: 20px; grid-template-columns: 1fr; }}
 
                 .card {{
@@ -826,11 +831,12 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
 
                 @media (max-width: 1080px) {{
                     .stats {{ grid-template-columns: 1fr 1fr 1fr; }}
+                    .three-col {{ grid-template-columns: 1fr 1fr; }}
                 }}
                 @media (max-width: 720px) {{
                     .page  {{ padding: 20px 14px 40px; }}
                     .hero  {{ padding: 22px; border-radius: 22px; }}
-                    .stats, .two-col {{ grid-template-columns: 1fr; }}
+                    .stats, .two-col, .three-col {{ grid-template-columns: 1fr; }}
                     .bar-row {{ grid-template-columns: 1fr 1fr auto; }}
                 }}
             </style>
@@ -863,8 +869,8 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
                     </article>
                 </section>
 
-                <!-- ── City temperature ranking + Ingestion volume ── -->
-                <section class="grid two-col">
+                <!-- ── City temperature ranking + Ingestion volume (split by type) ── -->
+                <section class="grid three-col">
                     <article class="card panel">
                         <h2>City temperature ranking</h2>
                         <p>Most recent observed temperature per city, sorted warmest to coldest.</p>
@@ -874,10 +880,15 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
                     </article>
 
                     <article class="card panel">
-                        <h2>Ingestion volume</h2>
-                        <p>Daily rows landing in the warehouse, bucketed by Pacific day.</p>
-                        {volume_legend}
-                        {volume_chart}
+                        <h2>Current ingestion volume</h2>
+                        <p>Daily current-weather rows landing in the warehouse, by Pacific day.</p>
+                        {current_volume_chart}
+                    </article>
+
+                    <article class="card panel">
+                        <h2>Forecast ingestion volume</h2>
+                        <p>Daily forecast rows landing in the warehouse, by Pacific day.</p>
+                        {forecast_volume_chart}
                     </article>
                 </section>
 

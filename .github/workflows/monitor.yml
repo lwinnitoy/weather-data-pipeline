@@ -2,7 +2,7 @@ name: Monitor Pipeline
 
 on:
   schedule:
-    - cron: "15 * * * *"  # 15 min after every hour, giving pipelines time to finish
+    - cron: "50 * * * *"  # 33 min after pipelines start at :17, giving them time to finish
   workflow_dispatch:       # manual trigger
 
 jobs:
