@@ -262,7 +262,9 @@ def build_dashboard_snapshot(days: int = 7, threshold_minutes: int = FRESHNESS_T
         ORDER BY day
     """
     # Forecast vs actual MAE bucketed by horizon. Match within a 30-minute window
-    # to account for slight timestamp misalignment between observation and forecast_timestamp.
+    # using a range predicate (sargable — allows index scan on wh.timestamp_utc)
+    # rather than ABS(EXTRACT(EPOCH ...)) which forces a full join scan.
+    # Scoped to the last 90 days to keep the join small.
     forecast_accuracy_sql = """
         SELECT
             CASE
@@ -277,8 +279,10 @@ def build_dashboard_snapshot(days: int = 7, threshold_minutes: int = FRESHNESS_T
         FROM weather_forecast wf
         JOIN weather_history wh
             ON  wh.city_id = wf.city_id
-            AND ABS(EXTRACT(EPOCH FROM (wh.timestamp_utc - wf.forecast_timestamp))) < 1800
+            AND wh.timestamp_utc >= wf.forecast_timestamp - INTERVAL '30 minutes'
+            AND wh.timestamp_utc <  wf.forecast_timestamp + INTERVAL '30 minutes'
         WHERE wf.temp_c IS NOT NULL AND wh.temp_c IS NOT NULL
+          AND wf.timestamp_utc >= NOW() - INTERVAL '90 days'
         GROUP BY 1
         ORDER BY MIN(wf.forecast_horizon)
     """
