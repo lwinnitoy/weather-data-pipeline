@@ -23,13 +23,16 @@ def test_build_dashboard_snapshot_queries_warehouse_data():
             (240, 3, datetime(2026, 6, 10, 10, 0, tzinfo=timezone.utc)),
         ]
         mock_cursor.fetchall.side_effect = [
-            [
+            [  # city_rows
                 (1, "Toronto", 50, datetime(2026, 6, 10, 11, 0, tzinfo=timezone.utc), 80, datetime(2026, 6, 10, 10, 0, tzinfo=timezone.utc)),
                 (2, "Montreal", 70, datetime(2026, 6, 10, 10, 30, tzinfo=timezone.utc), 160, datetime(2026, 6, 10, 9, 30, tzinfo=timezone.utc)),
             ],
-            [("Toronto", date(2026, 6, 9), 30)],          # daily_current
-            [("Toronto", date(2026, 6, 9), 60)],          # daily_forecast
-            [(date(2026, 6, 9), 12.5), (date(2026, 6, 10), 14.0)],  # temp_trend
+            [("Toronto", date(2026, 6, 9), 30)],                                          # daily_current
+            [("Toronto", date(2026, 6, 9), 60)],                                          # daily_forecast
+            [("Toronto", date(2026, 6, 9), 12.0)],                                        # city_temp_series
+            [(date(2026, 6, 9), 12.5, 8.0, 18.0), (date(2026, 6, 10), 14.0, 10.0, 20.0)],  # temp_band
+            [],                                                                            # forecast_accuracy
+            [],                                                                            # city_current_temps
         ]
 
         snapshot = dashboard.build_dashboard_snapshot(days=7, threshold_minutes=120)
@@ -63,7 +66,8 @@ def test_render_dashboard_html_contains_key_metrics():
     assert "Weather Data Pipeline Dashboard" in html
     assert "Current rows" in html
     assert "Toronto" in html
-    assert "Current rows by day" in html
+    assert "Pipeline health" in html
+    assert "Ingestion volume" in html
 
 
 def test_svg_line_chart_renders_svg_with_data():
