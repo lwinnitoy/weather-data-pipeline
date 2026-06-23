@@ -72,7 +72,7 @@ All `psycopg2.connect()` calls use `**config.DATABASE`, which includes `connect_
 
 ### Monitoring (`monitor.py`)
 
-Runs independently of the pipeline (hourly via `monitor.yml`, 15 min after each pipeline). Checks freshness (>120 min stale = warning) and anomaly detection (0 rows or >10× 7-day rolling baseline = warning). Sends a Gmail summary when warnings are found — silently skips if `GMAIL_USER` / `GMAIL_APP_PASSWORD` are not set.
+Runs independently of the pipeline (hourly via `monitor.yml` at :50, after pipelines run at :17). Checks freshness and anomaly detection (0 rows or >5× 7-day rolling baseline = warning). Freshness thresholds are per data type and deliberately loose because GitHub-hosted scheduled runs are best-effort (delayed/dropped): current >360 min (6 h) stale, forecast >720 min (12 h) stale — both overridable via `FRESHNESS_THRESHOLD_MINUTES` / `FORECAST_FRESHNESS_THRESHOLD_MINUTES`. `dashboard.py` uses the same thresholds for its freshness colour-coding. Sends a Gmail summary when warnings are found — silently skips if `GMAIL_USER` / `GMAIL_APP_PASSWORD` are not set; recipient falls back to `GMAIL_USER` when `ALERT_EMAIL_TO` is unset or empty.
 
 ## Key Conventions
 
