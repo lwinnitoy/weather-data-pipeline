@@ -36,10 +36,12 @@ DEFAULT_OUTPUT_PATH = Path("docs/index.html")
 
 DISPLAY_TZ = ZoneInfo("America/Vancouver")
 
-COLOR_CURRENT = "#62d0ff"
-COLOR_FORECAST = "#8be1bb"
-COLOR_BAND_FILL = "#62d0ff"
-COLOR_BAND_LINE = "#ffbc73"
+# Simplified palette: one accent (blue) used everywhere, plus a single warm
+# contrast for the anomaly-band average line. Status colours are muted.
+COLOR_CURRENT = "#4ea1ff"
+COLOR_FORECAST = "#4ea1ff"
+COLOR_BAND_FILL = "#4ea1ff"
+COLOR_BAND_LINE = "#e0a13c"
 
 # Stable per-city color palette — assigned alphabetically so colors don't shift
 # as cities are added or removed.
@@ -404,6 +406,13 @@ def _format_age(value: Optional[datetime], now: datetime) -> str:
     return f"{hours}h {minutes}m"
 
 
+def _format_age_kpi(value: Optional[datetime], now: datetime) -> str:
+    """Age for a KPI tile: '12 min ago', or 'No data' when absent."""
+    if value is None:
+        return "No data"
+    return f"{_format_age(value, now)} ago"
+
+
 def _format_short_day(d: date) -> str:
     return d.strftime("%b %d")
 
@@ -690,17 +699,16 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
     """Render a standalone HTML dashboard page."""
 
     summary_cards = "".join([
-        _render_stat_card("Current rows",   f"{snapshot.current_summary.rows:,}",  f"{snapshot.current_summary.stale_cities} stale cities"),
-        _render_stat_card("Forecast rows",  f"{snapshot.forecast_summary.rows:,}", f"{snapshot.forecast_summary.stale_cities} stale cities"),
-        _render_stat_card("Cities tracked", len(snapshot.city_statuses),            f"Current: {snapshot.current_summary.tracked_cities} / Forecast: {snapshot.forecast_summary.tracked_cities}"),
-        _render_stat_card("Latest current",  _format_timestamp(snapshot.current_summary.latest_ts),  "Warehouse snapshot"),
-        _render_stat_card("Latest forecast", _format_timestamp(snapshot.forecast_summary.latest_ts), "Warehouse snapshot"),
-        _render_stat_card("Generated at",    _format_timestamp(snapshot.generated_at), f"Rolling window: last {TREND_DAYS} days"),
+        _render_stat_card("Current rows",   f"{snapshot.current_summary.rows:,}",  f"{snapshot.current_summary.stale_cities} stale"),
+        _render_stat_card("Forecast rows",  f"{snapshot.forecast_summary.rows:,}", f"{snapshot.forecast_summary.stale_cities} stale"),
+        _render_stat_card("Cities",         len(snapshot.city_statuses),           f"cur {snapshot.current_summary.tracked_cities} / fcst {snapshot.forecast_summary.tracked_cities}"),
+        _render_stat_card("Latest current",  _format_age_kpi(snapshot.current_summary.latest_ts, snapshot.generated_at),  _format_timestamp(snapshot.current_summary.latest_ts)),
+        _render_stat_card("Latest forecast", _format_age_kpi(snapshot.forecast_summary.latest_ts, snapshot.generated_at), _format_timestamp(snapshot.forecast_summary.latest_ts)),
     ])
 
     ribbon_series = _build_city_ribbon_series(snapshot.city_temp_series)
     ribbon_legend = _chart_legend(ribbon_series)
-    ribbon_chart  = _svg_line_chart(ribbon_series, height=320, value_suffix="°", fill_area=False)
+    ribbon_chart  = _svg_line_chart(ribbon_series, width=900, height=300, value_suffix="°", fill_area=False)
 
     current_volume_series: List[Series] = [
         ("Current", COLOR_CURRENT, [(t.day, float(t.current_rows)) for t in snapshot.daily_totals if t.current_rows > 0]),
@@ -708,13 +716,15 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
     forecast_volume_series: List[Series] = [
         ("Forecast", COLOR_FORECAST, [(t.day, float(t.forecast_rows)) for t in snapshot.daily_totals if t.forecast_rows > 0]),
     ]
-    current_volume_chart  = _svg_line_chart(current_volume_series,  start_at_zero=True)
-    forecast_volume_chart = _svg_line_chart(forecast_volume_series, start_at_zero=True)
+    current_volume_chart  = _svg_line_chart(current_volume_series,  width=460, height=280, start_at_zero=True)
+    forecast_volume_chart = _svg_line_chart(forecast_volume_series, width=460, height=280, start_at_zero=True)
 
-    band_chart     = _svg_band_chart(snapshot.temp_band)
+    band_chart     = _svg_band_chart(snapshot.temp_band, width=640, height=300)
     accuracy_bars  = _render_forecast_accuracy_bars(snapshot.forecast_accuracy)
     temp_ranking   = _render_temp_ranking(snapshot.city_current_temps)
     freshness_rows = _render_freshness_table(snapshot)
+
+    generated = _format_timestamp(snapshot.generated_at)
 
     html = textwrap.dedent(f"""
     <!doctype html>
@@ -725,239 +735,205 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
             <title>{escape(title)}</title>
             <style>
                 :root {{
-                    --bg: #07111f;
-                    --panel: rgba(15, 28, 48, 0.92);
-                    --panel-border: rgba(140, 168, 208, 0.18);
-                    --text: #e8eef9;
-                    --muted: #97aac4;
-                    --accent: #62d0ff;
-                    --accent-2: #8be1bb;
-                    --accent-3: #ffbc73;
-                    --shadow: 0 24px 60px rgba(2, 8, 20, 0.45);
-                    --fresh: #8be1bb;
-                    --aging: #ffbc73;
-                    --stale: #ff6b6b;
+                    --bg: #0e0f12;
+                    --panel: #16181d;
+                    --track: #20242b;
+                    --border: #272b33;
+                    --text: #e6e8ec;
+                    --muted: #8b919c;
+                    --accent: #4ea1ff;
+                    --ok: #5fb878;
+                    --warn: #e0a13c;
+                    --bad: #e05a5a;
                 }}
 
                 * {{ box-sizing: border-box; }}
+                html, body {{ margin: 0; }}
                 body {{
-                    margin: 0;
-                    font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                     color: var(--text);
-                    background:
-                        radial-gradient(circle at top left,  rgba(98, 208, 255, 0.16), transparent 30%),
-                        radial-gradient(circle at top right, rgba(139, 225, 187, 0.12), transparent 26%),
-                        linear-gradient(180deg, #081120 0%, #07111f 55%, #050b14 100%);
+                    background: var(--bg);
+                    font-size: 14px;
+                    line-height: 1.4;
                 }}
 
-                .page {{ max-width: 1320px; margin: 0 auto; padding: 40px 24px 56px; }}
+                .page {{ max-width: 1560px; margin: 0 auto; padding: 18px 20px 28px; }}
 
-                .hero {{
-                    padding: 32px;
-                    border: 1px solid var(--panel-border);
-                    border-radius: 28px;
-                    background: linear-gradient(160deg, rgba(15, 28, 48, 0.96), rgba(9, 19, 35, 0.92));
-                    box-shadow: var(--shadow);
-                    position: relative;
-                    overflow: hidden;
+                /* ── Top bar ── */
+                .topbar {{
+                    display: flex; align-items: baseline; justify-content: space-between;
+                    gap: 16px; flex-wrap: wrap;
+                    padding-bottom: 14px; margin-bottom: 16px;
+                    border-bottom: 1px solid var(--border);
                 }}
-                .hero::after {{
-                    content: "";
-                    position: absolute;
-                    inset: auto -8% -40% auto;
-                    width: 280px; height: 280px;
-                    border-radius: 999px;
-                    background: radial-gradient(circle, rgba(98, 208, 255, 0.22), transparent 68%);
-                }}
-                .eyebrow {{
-                    text-transform: uppercase;
-                    letter-spacing: 0.18em;
-                    color: var(--accent);
-                    font-size: 0.78rem;
-                    margin-bottom: 10px;
-                }}
-                h1 {{ margin: 0; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 1.02; max-width: 11ch; }}
-                .hero-copy {{ max-width: 760px; color: var(--muted); margin: 16px 0 0; font-size: 1.02rem; line-height: 1.65; }}
+                .topbar h1 {{ margin: 0; font-size: 1.1rem; font-weight: 600; letter-spacing: 0.01em; }}
+                .topbar .sub {{ color: var(--muted); font-size: 0.82rem; }}
+                .topbar .gen {{ color: var(--muted); font-size: 0.8rem; }}
+                .accent-dot {{ color: var(--accent); }}
 
-                .grid    {{ display: grid; gap: 16px; }}
-                .stats   {{ grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-top: 18px; }}
-                .two-col   {{ margin-top: 20px; grid-template-columns: 1fr 1fr; }}
-                .three-col {{ margin-top: 20px; grid-template-columns: 1fr 1fr 1fr; }}
-                .one-col {{ margin-top: 20px; grid-template-columns: 1fr; }}
+                /* ── Grid system ── */
+                .grid {{ display: grid; gap: 12px; }}
+                .grid + .grid {{ margin-top: 12px; }}
+                .kpis  {{ grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }}
+                .row-2 {{ grid-template-columns: 3fr 2fr; }}
+                .row-3 {{ grid-template-columns: 1fr 1fr 1fr; }}
+                .row-2b {{ grid-template-columns: 1fr 1fr; }}
 
+                /* ── Cards ── */
                 .card {{
-                    border: 1px solid var(--panel-border);
+                    border: 1px solid var(--border);
                     background: var(--panel);
-                    border-radius: 22px;
-                    box-shadow: var(--shadow);
+                    border-radius: 8px;
                     min-width: 0;
                 }}
-                .stat-card {{ padding: 18px 18px 16px; min-height: 122px; }}
-                .card-label  {{ color: var(--muted); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.12em; }}
-                .card-value  {{ font-size: clamp(1.35rem, 2.3vw, 2rem); font-weight: 700; margin-top: 10px; }}
-                .card-detail {{ color: var(--muted); margin-top: 8px; font-size: 0.92rem; line-height: 1.5; }}
+                .panel {{ padding: 14px 16px; display: flex; flex-direction: column; }}
+                .panel h2 {{
+                    margin: 0; font-size: 0.72rem; font-weight: 600;
+                    text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted);
+                }}
+                .cap {{ margin: 3px 0 10px; color: var(--muted); font-size: 0.78rem; }}
 
-                .panel {{ padding: 20px; }}
-                .panel h2 {{ margin: 0 0 6px; font-size: 1.1rem; }}
-                .panel p  {{ margin: 0 0 14px; color: var(--muted); line-height: 1.6; font-size: 0.94rem; }}
+                /* ── KPI tiles ── */
+                .stat-card {{ padding: 12px 14px; }}
+                .card-label  {{ color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; }}
+                .card-value  {{ font-size: 1.5rem; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }}
+                .card-detail {{ color: var(--muted); margin-top: 3px; font-size: 0.76rem; }}
 
-                .chart-svg   {{ width: 100%; height: auto; display: block; margin-top: 10px; }}
-                .grid-line   {{ stroke: rgba(151, 170, 196, 0.12); stroke-width: 1; }}
+                /* ── Charts ── */
+                .chart-svg   {{ width: 100%; height: auto; display: block; margin-top: auto; }}
+                .grid-line   {{ stroke: #2b3038; stroke-width: 1; }}
                 .axis-label  {{ fill: var(--muted); font-size: 11px; }}
                 .axis-label.y {{ text-anchor: end; }}
-                .chart-empty {{ color: var(--muted); padding: 48px 0; text-align: center; font-size: 0.95rem; }}
+                .chart-empty {{ color: var(--muted); padding: 32px 0; text-align: center; font-size: 0.85rem; }}
 
-                .legend      {{ display: flex; gap: 14px; flex-wrap: wrap; margin: 4px 0 0; }}
-                .legend-item {{ display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 0.86rem; }}
-                .legend-swatch {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
+                .legend {{ display: flex; gap: 10px 14px; flex-wrap: wrap; margin: 6px 0 0; max-height: 52px; overflow: auto; }}
+                .legend-item {{ display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 0.74rem; }}
+                .legend-swatch {{ width: 10px; height: 10px; border-radius: 2px; display: inline-block; }}
 
-                .band-legend      {{ display: flex; gap: 20px; flex-wrap: wrap; margin: 4px 0 0; font-size: 0.86rem; color: var(--muted); }}
-                .band-legend-item {{ display: inline-flex; align-items: center; gap: 8px; }}
-                .band-swatch      {{ width: 28px; height: 10px; border-radius: 3px; display: inline-block; }}
+                .band-legend {{ display: flex; gap: 16px; flex-wrap: wrap; margin: 4px 0 0; font-size: 0.74rem; color: var(--muted); }}
+                .band-legend-item {{ display: inline-flex; align-items: center; gap: 7px; }}
+                .band-swatch {{ width: 24px; height: 9px; border-radius: 2px; display: inline-block; }}
 
-                .bars      {{ display: grid; gap: 12px; }}
-                .bar-row   {{ display: grid; grid-template-columns: 1.3fr 2fr auto; gap: 12px; align-items: center; }}
-                .bar-label {{ font-size: 0.92rem; color: var(--text); }}
-                .bar-value {{ font-size: 0.92rem; color: var(--text); text-align: right; white-space: nowrap; }}
-                .bar-count {{ color: var(--muted); font-size: 0.82rem; }}
-                .bar-track {{ height: 12px; background: rgba(151, 170, 196, 0.12); border-radius: 999px; overflow: hidden; }}
-                .bar-fill  {{ height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }}
+                /* ── Bar lists ── */
+                .scroll {{ overflow: auto; }}
+                .scroll.tall {{ max-height: 340px; }}
+                .bars      {{ display: grid; gap: 8px; }}
+                .bar-row   {{ display: grid; grid-template-columns: 1.2fr 2fr auto; gap: 10px; align-items: center; }}
+                .bar-label {{ font-size: 0.82rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+                .bar-value {{ font-size: 0.82rem; color: var(--text); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }}
+                .bar-count {{ color: var(--muted); font-size: 0.72rem; }}
+                .bar-track {{ height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }}
+                .bar-fill  {{ height: 100%; border-radius: inherit; background: var(--accent); }}
 
-                .table-wrap {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
-                table {{ width: 100%; border-collapse: collapse; min-width: 480px; }}
-                th, td {{ padding: 12px 10px; text-align: left; border-bottom: 1px solid rgba(151, 170, 196, 0.14); }}
-                th {{ color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; }}
-                td {{ font-size: 0.95rem; }}
-                tr:hover td {{ background: rgba(98, 208, 255, 0.04); }}
+                /* ── Tables ── */
+                table {{ width: 100%; border-collapse: collapse; }}
+                thead th {{ position: sticky; top: 0; background: var(--panel); z-index: 1; }}
+                th, td {{ padding: 7px 8px; text-align: left; border-bottom: 1px solid var(--border); }}
+                th {{ color: var(--muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }}
+                td {{ font-size: 0.82rem; font-variant-numeric: tabular-nums; }}
+                tbody tr:hover td {{ background: #1b1e24; }}
 
-                .status-fresh {{ color: var(--fresh); font-weight: 600; }}
-                .status-aging {{ color: var(--aging); font-weight: 600; }}
-                .status-stale {{ color: var(--stale); font-weight: 600; }}
+                .status-fresh {{ color: var(--ok); }}
+                .status-aging {{ color: var(--warn); }}
+                .status-stale {{ color: var(--bad); }}
 
-                .footer {{ color: var(--muted); margin-top: 20px; font-size: 0.9rem; }}
+                .footer {{ color: var(--muted); margin-top: 16px; font-size: 0.76rem; }}
 
-                @media (max-width: 1080px) {{
-                    .stats {{ grid-template-columns: 1fr 1fr 1fr; }}
-                    .three-col {{ grid-template-columns: 1fr 1fr; }}
+                @media (max-width: 1100px) {{
+                    .row-2, .row-3, .row-2b {{ grid-template-columns: 1fr 1fr; }}
                 }}
-                @media (max-width: 720px) {{
-                    .page  {{ padding: 20px 14px 40px; }}
-                    .hero  {{ padding: 22px; border-radius: 22px; }}
-                    .stats, .two-col, .three-col {{ grid-template-columns: 1fr; }}
-                    .bar-row {{ grid-template-columns: 1fr 1fr auto; }}
+                @media (max-width: 680px) {{
+                    .row-2, .row-3, .row-2b {{ grid-template-columns: 1fr; }}
+                    .bar-row {{ grid-template-columns: 1fr 1.4fr auto; }}
                 }}
             </style>
         </head>
         <body>
             <main class="page">
 
-                <!-- ── Hero ── -->
-                <section class="hero">
-                    <div class="eyebrow">Portfolio dashboard</div>
-                    <h1>{escape(title)}</h1>
-                    <p class="hero-copy">
-                        A static snapshot of the weather pipeline warehouse —
-                        {len(snapshot.city_statuses)} cities, current observations and 5-day forecasts.
-                        Times shown in Pacific (Victoria, BC). Publishes on Cloudflare Pages with no
-                        server-side runtime.
-                    </p>
-                    <div class="grid stats">
-                        {summary_cards}
+                <!-- ── Top bar ── -->
+                <header class="topbar">
+                    <div>
+                        <h1><span class="accent-dot">●</span> {escape(title)}</h1>
+                        <div class="sub">{len(snapshot.city_statuses)} cities · current + 5-day forecast · Pacific time (Victoria, BC)</div>
                     </div>
+                    <div class="gen">Generated {generated}</div>
+                </header>
+
+                <!-- ── KPI strip ── -->
+                <section class="grid kpis">
+                    {summary_cards}
                 </section>
 
-                <!-- ── Multi-city temperature ribbon ── -->
-                <section class="grid one-col">
+                <!-- ── Main charts: ribbon + anomaly band ── -->
+                <section class="grid row-2">
                     <article class="card panel">
-                        <h2>Temperature by city — last {TREND_DAYS} days</h2>
-                        <p>Daily average temperature per city. One series per city; stable color assignment below.</p>
-                        {ribbon_legend}
+                        <h2>Temperature by city · {TREND_DAYS}d</h2>
+                        <div class="cap">Daily average temperature per city</div>
                         {ribbon_chart}
+                        {ribbon_legend}
                     </article>
-                </section>
-
-                <!-- ── City temperature ranking + Ingestion volume (split by type) ── -->
-                <section class="grid three-col">
-                    <article class="card panel">
-                        <h2>City temperature ranking</h2>
-                        <p>Most recent observed temperature per city, sorted warmest to coldest.</p>
-                        <div class="bars">
-                            {temp_ranking}
-                        </div>
-                    </article>
-
-                    <article class="card panel">
-                        <h2>Current ingestion volume</h2>
-                        <p>Daily current-weather rows landing in the warehouse, by Pacific day.</p>
-                        {current_volume_chart}
-                    </article>
-
-                    <article class="card panel">
-                        <h2>Forecast ingestion volume</h2>
-                        <p>Daily forecast rows landing in the warehouse, by Pacific day.</p>
-                        {forecast_volume_chart}
-                    </article>
-                </section>
-
-                <!-- ── Temperature anomaly band ── -->
-                <section class="grid one-col">
                     <article class="card panel">
                         <h2>Temperature spread &amp; anomaly band</h2>
-                        <p>
-                            Shaded region spans the min-to-max temperature across all cities each day.
-                            The line shows the cross-city daily average. A reading well outside the
-                            historical band is what triggers the pipeline monitor's anomaly alert.
-                        </p>
+                        <div class="cap">Cross-city min–max range, with daily average overlaid</div>
                         <div class="band-legend">
-                            <span class="band-legend-item">
-                                <span class="band-swatch" style="background:{COLOR_BAND_FILL}; opacity:0.45;"></span>
-                                Min–max range across all cities
-                            </span>
-                            <span class="band-legend-item">
-                                <span class="band-swatch" style="background:{COLOR_BAND_LINE};"></span>
-                                Cross-city daily average
-                            </span>
+                            <span class="band-legend-item"><span class="band-swatch" style="background:{COLOR_BAND_FILL}; opacity:0.4;"></span>min–max</span>
+                            <span class="band-legend-item"><span class="band-swatch" style="background:{COLOR_BAND_LINE};"></span>daily avg</span>
                         </div>
                         {band_chart}
                     </article>
                 </section>
 
-                <!-- ── Forecast accuracy by horizon ── -->
-                <section class="grid one-col">
+                <!-- ── Volume + forecast accuracy ── -->
+                <section class="grid row-3">
+                    <article class="card panel">
+                        <h2>Current ingestion volume</h2>
+                        <div class="cap">Rows/day landing in the warehouse</div>
+                        {current_volume_chart}
+                    </article>
+                    <article class="card panel">
+                        <h2>Forecast ingestion volume</h2>
+                        <div class="cap">Rows/day landing in the warehouse</div>
+                        {forecast_volume_chart}
+                    </article>
                     <article class="card panel">
                         <h2>Forecast accuracy by horizon</h2>
-                        <p>
-                            Mean absolute error (°C) between forecast temperature and the matched actual
-                            observation (±30 min window). Higher MAE at longer horizons demonstrates
-                            skill degradation — a standard metric in numerical weather prediction.
-                        </p>
-                        <div class="bars" style="max-width: 600px;">
+                        <div class="cap">Mean absolute error (°C), forecast vs actual</div>
+                        <div class="bars">
                             {accuracy_bars}
                         </div>
                     </article>
                 </section>
 
-                <!-- ── Pipeline health / freshness ── -->
-                <section class="grid one-col">
+                <!-- ── Ranking + pipeline health ── -->
+                <section class="grid row-2b">
+                    <article class="card panel">
+                        <h2>City temperature ranking</h2>
+                        <div class="cap">Latest observed temperature, warmest to coldest</div>
+                        <div class="scroll tall">
+                            <div class="bars">
+                                {temp_ranking}
+                            </div>
+                        </div>
+                    </article>
                     <article class="card panel">
                         <h2>Pipeline health</h2>
-                        <p>
-                            Data freshness per city. Age is time since the most recent record landed in
-                            the warehouse. <span class="status-fresh">Green</span> fresh ·
-                            <span class="status-aging">Amber</span> aging ·
-                            <span class="status-stale">Red</span> stale. Thresholds are generous
-                            ({FRESHNESS_THRESHOLD_MINUTES // 60}h current, {FORECAST_FRESHNESS_THRESHOLD_MINUTES // 60}h forecast)
-                            because GitHub Actions schedules runs on a best-effort basis.
-                        </p>
-                        <div class="table-wrap">
+                        <div class="cap">
+                            Freshness per city ·
+                            <span class="status-fresh">fresh</span> /
+                            <span class="status-aging">aging</span> /
+                            <span class="status-stale">stale</span> ·
+                            {FRESHNESS_THRESHOLD_MINUTES // 60}h current, {FORECAST_FRESHNESS_THRESHOLD_MINUTES // 60}h forecast SLA
+                        </div>
+                        <div class="scroll tall">
                             <table>
                                 <thead>
                                     <tr>
                                         <th>City</th>
-                                        <th>Current age</th>
-                                        <th>Current rows</th>
-                                        <th>Forecast age</th>
-                                        <th>Forecast rows</th>
+                                        <th>Cur age</th>
+                                        <th>Cur rows</th>
+                                        <th>Fcst age</th>
+                                        <th>Fcst rows</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -968,9 +944,7 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
                     </article>
                 </section>
 
-                <div class="footer">
-                    Generated from PostgreSQL warehouse at {_format_timestamp(snapshot.generated_at)}.
-                </div>
+                <div class="footer">Static snapshot from the PostgreSQL warehouse · no server-side runtime · deployed on Cloudflare Pages</div>
 
             </main>
         </body>
