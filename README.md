@@ -46,8 +46,8 @@ Key design decisions:
 - Declarative data validation with configurable null rate and uniqueness thresholds
 - Local filesystem and Cloudflare R2 storage backends with a unified interface
 - Hourly freshness and anomaly monitoring with Gmail email alerts
-- Self-contained static HTML dashboard (no JS dependencies) with inline SVG charts, deployed to Cloudflare Pages
-- 148 unit tests + 2 Docker-gated integration tests; CI on every push
+- Self-contained static HTML dashboard (no JS dependencies) with inline SVG charts deployed to Cloudflare Pages: multi-city temperature ribbon, cross-city anomaly band, forecast-accuracy-by-horizon (MAE), temperature ranking, ingestion volume, and a per-city freshness table
+- 149 unit tests + Docker-gated integration tests (current + forecast); CI on every push / PR
 
 ---
 
@@ -92,7 +92,7 @@ migrations/              # SQL schema and seed migrations
   monitor.yml            # Hourly monitoring + anomaly checks
   publish_dashboard.yml  # Daily dashboard build + Cloudflare Pages deploy
   tests.yml              # Unit + integration tests on push/PR
-tests/                   # 148 unit tests + 2 integration tests
+tests/                   # 149 unit tests + 2 Docker-gated integration tests
 ```
 
 ---
@@ -142,7 +142,7 @@ R2_BUCKET_NAME=...
 # Optional: Gmail alerting (monitor.py skips email silently if unset)
 GMAIL_USER=your_gmail_address@gmail.com
 GMAIL_APP_PASSWORD=your_app_password   # generate at myaccount.google.com/apppasswords
-ALERT_EMAIL_TO=recipient@example.com   # defaults to GMAIL_USER if unset
+ALERT_EMAIL_TO=recipient@example.com   # defaults to GMAIL_USER if unset or empty
 ```
 
 ### 3. Apply database migrations
@@ -202,11 +202,13 @@ All scheduled workflows run against the production PostgreSQL instance using Git
 
 | Workflow | Schedule | What it does |
 |----------|----------|-------------|
-| `current_pipeline.yml` | Every hour (`0 * * * *`) | Runs `orchestrator.py --data-types current` |
-| `forecast_pipeline.yml` | Every 3 hours (`0 */3 * * *`) | Runs `orchestrator.py --data-types forecast` |
-| `monitor.yml` | :15 past every hour | Runs `monitor.py`; emails alert if freshness/anomaly warnings found |
+| `current_pipeline.yml` | Every hour at :17 (`17 * * * *`) | Runs `orchestrator.py --data-types current` |
+| `forecast_pipeline.yml` | Every 3 hours at :17 (`17 */3 * * *`) | Runs `orchestrator.py --data-types forecast` |
+| `monitor.yml` | :50 past every hour | Runs `monitor.py`; emails alert if freshness/anomaly warnings found |
 | `publish_dashboard.yml` | Daily at 07:00 UTC | Generates dashboard HTML and deploys to Cloudflare Pages via `wrangler` |
-| `tests.yml` | On push / PR to main or dev | Runs full unit test suite; integration tests on main and nightly |
+| `tests.yml` | On push / PR to main or dev | Runs full unit test suite; integration tests on PR, push to main/dev, and nightly |
+
+> **Note on scheduling:** GitHub-hosted scheduled workflows are best-effort — runs are routinely delayed 20–40 min and frequently dropped entirely under load, so the pipeline can go several hours between successful runs even when nothing is broken. The cron minute is offset to `:17` to dodge top-of-hour congestion, and the freshness thresholds in `monitor.py` / `dashboard.py` are deliberately loose (6 h current, 12 h forecast) so this normal scheduler behaviour does not raise false alarms. For strict cadence, an external trigger (self-hosted runner or a cron service hitting `workflow_dispatch`) would be required.
 
 ### GitHub Actions secrets required
 

@@ -67,7 +67,7 @@ def test_render_dashboard_html_contains_key_metrics():
     assert "Current rows" in html
     assert "Toronto" in html
     assert "Pipeline health" in html
-    assert "Ingestion volume" in html
+    assert "ingestion volume" in html
 
 
 def test_svg_line_chart_renders_svg_with_data():
