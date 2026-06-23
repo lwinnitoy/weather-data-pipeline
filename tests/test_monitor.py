@@ -401,6 +401,22 @@ class TestSendAlertEmail:
         assert sent_msg["To"] == "sender@gmail.com"
 
     @patch("monitor.smtplib.SMTP_SSL")
+    def test_empty_recipient_env_falls_back_to_sender(self, mock_smtp_cls, monkeypatch):
+        """An empty ALERT_EMAIL_TO (as injected by an undefined GHA secret) falls back to GMAIL_USER."""
+        monkeypatch.setenv("GMAIL_USER", "sender@gmail.com")
+        monkeypatch.setenv("GMAIL_APP_PASSWORD", "app-password")
+        monkeypatch.setenv("ALERT_EMAIL_TO", "")  # set-but-empty, not absent
+
+        mock_server = MagicMock()
+        mock_smtp_cls.return_value.__enter__ = MagicMock(return_value=mock_server)
+        mock_smtp_cls.return_value.__exit__ = MagicMock(return_value=False)
+
+        send_alert_email(["a warning"])
+
+        sent_msg = mock_server.send_message.call_args[0][0]
+        assert sent_msg["To"] == "sender@gmail.com"
+
+    @patch("monitor.smtplib.SMTP_SSL")
     def test_logs_error_on_smtp_exception(self, mock_smtp_cls, caplog, monkeypatch):
         """SMTPException is caught and logged — does not propagate."""
         monkeypatch.setenv("GMAIL_USER", "sender@gmail.com")

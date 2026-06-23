@@ -219,7 +219,10 @@ def send_alert_email(warnings: list) -> None:
         logger.warning("Email alert skipped: GMAIL_USER or GMAIL_APP_PASSWORD not set")
         return
 
-    recipient = os.getenv("ALERT_EMAIL_TO", gmail_user)
+    # Use `or` rather than getenv's default: in GitHub Actions an undefined
+    # secret is injected as an empty string (not absent), so the default would
+    # never apply and we'd try to send to "" — Gmail rejects this with a 555.
+    recipient = (os.getenv("ALERT_EMAIL_TO") or "").strip() or gmail_user
     run_time = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     subject = f"[Weather Pipeline] {len(warnings)} monitoring alert(s) — {run_time}"
 
