@@ -27,7 +27,24 @@ import utils
 
 logger = logging.getLogger(__name__)
 
-FRESHNESS_THRESHOLD_MINUTES = 90   # alert if last record is older than 90 min (pipeline runs hourly at :17)
+# Scheduled workflows on GitHub-hosted runners are best-effort: runs are
+# routinely delayed 20-40 min and frequently dropped entirely under load.
+# Observed gaps between *successful* runs reach ~6h (current) even when nothing
+# is broken, so these thresholds are deliberately loose to avoid false alarms.
+# A genuine outage (dead API key, DB down) shows as data that never refreshes,
+# well beyond these limits. Overridable via env for tuning.
+FRESHNESS_THRESHOLD_MINUTES = int(os.getenv("FRESHNESS_THRESHOLD_MINUTES", "360"))  # current weather (~6h)
+
+_FRESHNESS_THRESHOLD_BY_TYPE = {
+    "current": FRESHNESS_THRESHOLD_MINUTES,                                          # hourly schedule
+    "forecast": int(os.getenv("FORECAST_FRESHNESS_THRESHOLD_MINUTES", "720")),       # 3-hourly schedule (~12h)
+}
+
+
+def _freshness_threshold(data_type: str) -> int:
+    """Per-type staleness threshold; forecast runs 3x less often so tolerates more lag."""
+    return _FRESHNESS_THRESHOLD_BY_TYPE.get(data_type, FRESHNESS_THRESHOLD_MINUTES)
+
 
 # How many hours to treat as the "current" window for anomaly detection.
 # Sized to 3x pipeline frequency so a single delayed run doesn't false-alarm.
@@ -57,14 +74,15 @@ def monitor_pipeline(data_types) -> list:
         logger.info("=== Monitoring %s ===", data_type)
 
         # --- Freshness ---
+        threshold = _freshness_threshold(data_type)
         freshness = check_data_freshness(city_mapping, data_type)
         if not freshness:
             msg = f"No {data_type} data found in DB — cannot assess freshness"
             logger.warning(msg)
             warnings.append(msg)
         for city_name, minutes_old in freshness.items():
-            if minutes_old > FRESHNESS_THRESHOLD_MINUTES:
-                overdue = minutes_old - FRESHNESS_THRESHOLD_MINUTES
+            if minutes_old > threshold:
+                overdue = minutes_old - threshold
                 msg = (
                     f"{data_type} data for {city_name} is stale: "
                     f"{minutes_old:.1f} min since last update ({overdue:.1f} min overdue)"

@@ -25,7 +25,12 @@ import psycopg2
 
 import config
 
-FRESHNESS_THRESHOLD_MINUTES = 120
+# GitHub-hosted scheduled runs are best-effort — delayed and frequently dropped
+# under load — so freshness thresholds are loose to avoid flagging stale on the
+# status display when the pipeline is actually healthy. Forecast runs 3x less
+# often (every 3h vs hourly) so it tolerates proportionally more lag.
+FRESHNESS_THRESHOLD_MINUTES = 360           # current weather (~6h)
+FORECAST_FRESHNESS_THRESHOLD_MINUTES = 720  # forecast (~12h)
 TREND_DAYS = 14  # rolling window for temperature charts
 DEFAULT_OUTPUT_PATH = Path("docs/index.html")
 
@@ -315,8 +320,10 @@ def build_dashboard_snapshot(days: int = 7, threshold_minutes: int = FRESHNESS_T
         )
         for row in city_rows
     ]
+    # threshold_minutes (CLI --threshold-minutes) governs current; forecast uses
+    # its own looser threshold since it runs 3x less often.
     current_stale  = sum(1 for s in city_statuses if _count_stale(s.current_latest,  generated_at, threshold_minutes))
-    forecast_stale = sum(1 for s in city_statuses if _count_stale(s.forecast_latest, generated_at, threshold_minutes))
+    forecast_stale = sum(1 for s in city_statuses if _count_stale(s.forecast_latest, generated_at, FORECAST_FRESHNESS_THRESHOLD_MINUTES))
 
     daily_current  = [DailyCount("current",  row[0], row[1], row[2]) for row in daily_current_rows]
     daily_forecast = [DailyCount("forecast", row[0], row[1], row[2]) for row in daily_forecast_rows]
@@ -401,12 +408,12 @@ def _format_short_day(d: date) -> str:
     return d.strftime("%b %d")
 
 
-def _freshness_css_class(age_minutes: Optional[float]) -> str:
+def _freshness_css_class(age_minutes: Optional[float], threshold: int = FRESHNESS_THRESHOLD_MINUTES) -> str:
     if age_minutes is None:
         return "status-stale"
-    if age_minutes < FRESHNESS_THRESHOLD_MINUTES / 2:
+    if age_minutes < threshold / 2:
         return "status-fresh"
-    if age_minutes <= FRESHNESS_THRESHOLD_MINUTES:
+    if age_minutes <= threshold:
         return "status-aging"
     return "status-stale"
 
@@ -666,9 +673,9 @@ def _render_freshness_table(snapshot: DashboardSnapshot) -> str:
         rows.append(f"""
             <tr>
                 <td>{escape(status.city_name)}</td>
-                <td class="{_freshness_css_class(c_age)}">{escape(_format_age(status.current_latest, now))}</td>
+                <td class="{_freshness_css_class(c_age, FRESHNESS_THRESHOLD_MINUTES)}">{escape(_format_age(status.current_latest, now))}</td>
                 <td>{status.current_rows:,}</td>
-                <td class="{_freshness_css_class(f_age)}">{escape(_format_age(status.forecast_latest, now))}</td>
+                <td class="{_freshness_css_class(f_age, FORECAST_FRESHNESS_THRESHOLD_MINUTES)}">{escape(_format_age(status.forecast_latest, now))}</td>
                 <td>{status.forecast_rows:,}</td>
             </tr>
         """)
@@ -936,10 +943,11 @@ def render_dashboard_html(snapshot: DashboardSnapshot, title: str = "Weather Dat
                         <h2>Pipeline health</h2>
                         <p>
                             Data freshness per city. Age is time since the most recent record landed in
-                            the warehouse.
-                            <span class="status-fresh">Green</span> = fresh (&lt;{FRESHNESS_THRESHOLD_MINUTES // 2} min) ·
-                            <span class="status-aging">Amber</span> = aging (&lt;{FRESHNESS_THRESHOLD_MINUTES} min) ·
-                            <span class="status-stale">Red</span> = stale (exceeds {FRESHNESS_THRESHOLD_MINUTES}-min SLA).
+                            the warehouse. <span class="status-fresh">Green</span> fresh ·
+                            <span class="status-aging">Amber</span> aging ·
+                            <span class="status-stale">Red</span> stale. Thresholds are generous
+                            ({FRESHNESS_THRESHOLD_MINUTES // 60}h current, {FORECAST_FRESHNESS_THRESHOLD_MINUTES // 60}h forecast)
+                            because GitHub Actions schedules runs on a best-effort basis.
                         </p>
                         <div class="table-wrap">
                             <table>
